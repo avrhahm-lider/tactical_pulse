@@ -53,8 +53,8 @@ Entity
    * Roles: `MainCommandCenter`, `AreaCommandCenter`, `Squad`, `SapperSquad`, `Radar`.
 2. **User & Unit Management (`/admin/users`)**:
    * Creation of units by `MainCommandCenter`.
-   * Squad registration with soldiers (7-digit IDs). If any soldier has role `"sapper"`, the unit automatically receives role `SapperSquad`.
-   * Automatic calculation of operational `area` (`North`, `Center`, `South`) based on latitude.
+   * Squad registration with soldiers (7-digit IDs); soldiers optional for Command Centers/Radars. If any soldier has role `"sapper"`, the unit automatically receives role `SapperSquad`.
+   * Automatic calculation of operational `area` (`North`, `Center`, `South` based on latitude; `'Global'` for `MainCommandCenter`).
    * Soft deactivation (`status = 'inactive'`).
 3. **Interactive Map & Operational Zones**:
    * React + Leaflet with Canvas renderer for smooth tactical markers.
@@ -70,7 +70,7 @@ Entity
 5. **Visibility Rules Engine**:
    * `MainCommandCenter`: Sees all squads and threats across all zones.
    * `AreaCommandCenter`: Sees all squads and threats within its assigned zone.
-   * `Squad` / `SapperSquad` / `Radar`: Tactical visibility within a **20 km radius** (`ST_DWithin` 20,000 m).
+   * `Squad` / `SapperSquad` / `Radar`: Tactical visibility within a **20 km radius** (`ST_DWithin(u.geom::geography, target.geom::geography, 20000)`).
 6. **Threats Lifecycle Management**:
    * Form-based creation via REST `POST /threats` (triggers WebSocket broadcast `threat_created`).
    * **Dual Creation Modes (UI/UX)**:

@@ -12,9 +12,9 @@ The map of Israel is divided into three operational areas defined by latitude bo
 * **`South`**: Lat $< 31.9000$
 
 ### Visibility Permissions:
-1. **`MainCommandCenter`**: Global visibility — sees all squads, radars, and threats across all zones without restrictions.
+1. **`MainCommandCenter`**: Global visibility (`area = 'Global'`) — sees all squads, radars, and threats across all zones without restrictions.
 2. **`AreaCommandCenter`**: Regional visibility — sees all entities and threats located strictly inside its assigned zone (`Center`, `North`, or `South`).
-3. **`Squad` / `SapperSquad` / `Radar`**: Tactical visibility — sees other squads and threats within a **20 km radius** (`20000` meters, calculated via PostGIS `ST_DWithin`) from their current position.
+3. **`Squad` / `SapperSquad` / `Radar`**: Tactical visibility — sees other squads and threats within a **20 km radius** (`20000` meters, calculated in PostGIS via `ST_DWithin(u.geom::geography, target.geom::geography, 20000)`) from their current position.
 
 ---
 
@@ -76,8 +76,8 @@ Base URL: `http://<host>/api/v1`
 
 ### Administration & Unit Management (`/admin`) — *MainCommandCenter Only*
 * **POST `/admin/users`**
-  * **Headers:** `Authorization: Bearer <JWT>` (Must have `role: "MainCommandCenter"`)
-  * **Description:** Creates a new squad, operational center, or radar unit. Accepts initial coordinates (`lat`, `lon`), from which the server automatically calculates and assigns the `area` (`North`, `Center`, or `South`). For squads, receives a `soldiers` array (each with exactly a 7-digit ID, name, and role). If any soldier has `role: "sapper"`, the unit's role is automatically assigned as `SapperSquad`. Also automatically creates the initial record in `map_entities`.
+  * **Headers:** `Authorization: Bearer <JWT>` (Must have `role: "MainCommandCenter"` and `status: "active"`)
+  * **Description:** Creates a new squad, operational center, or radar unit. Accepts initial coordinates (`lat`, `lon`), from which the server automatically calculates and assigns the `area` (`North`, `Center`, or `South`; for `MainCommandCenter` defaults to `'Global'`). For squads, `soldiers` is required (array of objects with 7-digit ID, name, role); for command centers and radars, `soldiers` is optional. If any soldier in a squad has `role: "sapper"`, the unit's role is automatically assigned as `SapperSquad`. Also automatically creates the initial record in `map_entities`.
   * **Request Body:**
     ```json
     {
@@ -245,7 +245,8 @@ Base URL: `http://<host>/api/v1`
           "lat": 32.0800,
           "lon": 34.7800,
           "altitude": null,
-          "status": "active"
+          "status": "active",
+          "updated_at": "2026-10-08T16:05:00Z"
         }
       ]
     }
@@ -255,7 +256,8 @@ Base URL: `http://<host>/api/v1`
 
 ## 4. WebSocket Protocol (Socket.IO)
 
-> **Handshake Auth:** Token must be passed in the `auth` object:
+> **Handshake Auth & Security:**
+> Token must be passed in the `auth` object:
 > ```javascript
 > const socket = io(SOCKET_URL, {
 >   auth: {
@@ -263,6 +265,7 @@ Base URL: `http://<host>/api/v1`
 >   }
 > });
 > ```
+> * **Active Status Enforcement:** Server verifies JWT signature and validates that `user.status == "active"`. If a user is deactivated (`status: "inactive"`), the handshake is rejected with `401/403`, and any currently active socket connection is terminated immediately.
 
 ### Client ➔ Server Events
 
@@ -322,7 +325,7 @@ CREATE TABLE users (
     username VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL CHECK (role IN ('MainCommandCenter', 'AreaCommandCenter', 'Squad', 'SapperSquad', 'Radar')),
-    area VARCHAR(20) NOT NULL CHECK (area IN ('Center', 'North', 'South')),
+    area VARCHAR(20) NOT NULL CHECK (area IN ('Center', 'North', 'South', 'Global')),
     name VARCHAR(150) NOT NULL,
     description TEXT,
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
