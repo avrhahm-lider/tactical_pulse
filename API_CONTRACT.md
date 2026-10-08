@@ -13,7 +13,7 @@ The map is divided into three operational areas:
 
 ### Visibility Permissions:
 1. **`MainCommandCenter`**: Has global visibility — sees all squads, radars, and threats across all zones without restrictions.
-2. **`AreaCommandCenter`**: Has regional visibility — sees all entities and threats strictly inside its assigned zone (`Center`, `North`, or `South`).
+2. **`AreaCommandCenter`**: Has regional visibility — sees all entities and threats strictly inside its assigned zone (`Center`, `North`, or `South`), determined dynamically by its initial location on the map.
 3. **`Squad` / `SapperSquad` / `Radar`**: Tactical visibility — sees other squads and threats within a **20 km radius** (`20000` meters) from their current position.
 
 ---
@@ -42,16 +42,17 @@ Base URL: `http://<host>/api/v1`
 ### Administration & User Management (`/admin`) — *MainCommandCenter Only*
 * **POST `/admin/users`**
   * **Headers:** `Authorization: Bearer <JWT>` (Must belong to `MainCommandCenter`)
-  * **Description:** Creates a new squad, operational center, or radar unit. You must assign an operational area (`Center`, `North`, `South`). For squads, you specify a `name`, `description`, and soldiers array. If any soldier has `is_sapper: true`, the role automatically resolves to `SapperSquad`.
+  * **Description:** Creates a new squad, operational center, or radar unit. You pass initial coordinates (`lat`, `lon`), and the server automatically calculates and assigns the operational `area` (`Center`, `North`, or `South`). For squads, you specify a `name`, `description`, and soldiers array. If any soldier has `is_sapper: true`, the role automatically resolves to `SapperSquad`.
   * **Request Body:**
     ```json
     {
       "username": "squad_bravo",
       "password": "secure_password",
       "role": "Squad",
-      "area": "North",
       "name": "Bravo Assault Team",
-      "description": "Primary reconnaissance squad for sector North",
+      "description": "Primary reconnaissance squad",
+      "lat": 32.0853,
+      "lon": 34.7818,
       "soldiers": [
         { "id": "1234567", "name": "John Doe", "is_sapper": false },
         { "id": "7654321", "name": "Jane Smith", "is_sapper": true }
@@ -64,9 +65,9 @@ Base URL: `http://<host>/api/v1`
       "id": "uuid-string",
       "username": "squad_bravo",
       "role": "SapperSquad",
-      "area": "North",
+      "area": "North", // Calculated automatically by server geometry intersection
       "name": "Bravo Assault Team",
-      "description": "Primary reconnaissance squad for sector North",
+      "description": "Primary reconnaissance squad",
       "status": "active",
       "soldiers": [
         { "id": "1234567", "name": "John Doe", "is_sapper": false },
@@ -84,7 +85,7 @@ Base URL: `http://<host>/api/v1`
 ### Map & Entities (`/map`)
 * **GET `/map/snapshot`**
   * **Headers:** `Authorization: Bearer <JWT>`
-  * **Description:** Returns active map snapshot filtered by user role and zone/radius rules.
+  * **Description:** Returns active map snapshot filtered by user role, zone, and 20km radius rules.
   * **Response (200):**
     ```json
     {
@@ -239,13 +240,13 @@ Base URL: `http://<host>/api/v1`
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- 1. Users / Entities Table (With Area assignment)
+-- 1. Users / Entities Table (Area is computed or stored based on location)
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     username VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL, -- MainCommandCenter, AreaCommandCenter, Squad, SapperSquad, Radar
-    area VARCHAR(20) NOT NULL CHECK (area IN ('Center', 'North', 'South')), -- Operational Zone
+    area VARCHAR(20) NOT NULL CHECK (area IN ('Center', 'North', 'South')), -- Determined by server on creation
     name VARCHAR(150), -- Display name for squads/centers
     description TEXT, -- Operational description
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
