@@ -6,10 +6,10 @@ This document defines the contract, communication protocol, and database schema 
 
 ## 1. Zones & Visibility Rules
 
-The map is divided into three operational areas:
-* `Center`
-* `North`
-* `South`
+The map of Israel is divided into three geographical operational areas defined by latitude thresholds:
+* **`North`**: Lat $\ge 32.7000$
+* **`Center`**: $31.9000 \le \text{Lat} < 32.7000$
+* **`South`**: Lat $< 31.9000$
 
 ### Visibility Permissions:
 1. **`MainCommandCenter`**: Has global visibility — sees all squads, radars, and threats across all zones without restrictions.
@@ -42,7 +42,7 @@ Base URL: `http://<host>/api/v1`
 ### Administration & User Management (`/admin`) — *MainCommandCenter Only*
 * **POST `/admin/users`**
   * **Headers:** `Authorization: Bearer <JWT>` (Must belong to `MainCommandCenter`)
-  * **Description:** Creates a new squad, operational center, or radar unit. You pass initial coordinates (`lat`, `lon`), and the server automatically calculates and assigns the operational `area` (`Center`, `North`, or `South`). For squads, you specify a `name`, `description`, and soldiers array. If any soldier has `is_sapper: true`, the role automatically resolves to `SapperSquad`.
+  * **Description:** Creates a new squad, operational center, or radar unit. You pass initial coordinates (`lat`, `lon`), and the server automatically calculates and assigns the operational `area` based on Israeli geographic coordinates. For squads, specify a `name`, `description`, and soldiers array (each with a 7-digit ID, name, and flexible `role`). If any soldier has `role: "sapper"`, the system automatically assigns the `SapperSquad` role to the unit.
   * **Request Body:**
     ```json
     {
@@ -54,8 +54,8 @@ Base URL: `http://<host>/api/v1`
       "lat": 32.0853,
       "lon": 34.7818,
       "soldiers": [
-        { "id": "1234567", "name": "John Doe", "is_sapper": false },
-        { "id": "7654321", "name": "Jane Smith", "is_sapper": true }
+        { "id": "1234567", "name": "John Doe", "role": "rifleman" },
+        { "id": "7654321", "name": "Jane Smith", "role": "sapper" }
       ]
     }
     ```
@@ -65,13 +65,13 @@ Base URL: `http://<host>/api/v1`
       "id": "uuid-string",
       "username": "squad_bravo",
       "role": "SapperSquad",
-      "area": "North", // Calculated automatically by server geometry intersection
+      "area": "Center", // Automatically computed from lat (32.0853 falls into Center)
       "name": "Bravo Assault Team",
       "description": "Primary reconnaissance squad",
       "status": "active",
       "soldiers": [
-        { "id": "1234567", "name": "John Doe", "is_sapper": false },
-        { "id": "7654321", "name": "Jane Smith", "is_sapper": true }
+        { "id": "1234567", "name": "John Doe", "role": "rifleman" },
+        { "id": "7654321", "name": "Jane Smith", "role": "sapper" }
       ]
     }
     ```
@@ -95,7 +95,7 @@ Base URL: `http://<host>/api/v1`
           "name": "Bravo Assault Team",
           "description": "Primary reconnaissance squad",
           "role": "SapperSquad",
-          "area": "North",
+          "area": "Center",
           "lat": 32.0853,
           "lon": 34.7818,
           "heading": 90.0,
@@ -240,25 +240,25 @@ Base URL: `http://<host>/api/v1`
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS postgis;
 
--- 1. Users / Entities Table (Area is computed or stored based on location)
+-- 1. Users / Entities Table (Area is computed based on coordinates)
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     username VARCHAR(100) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL, -- MainCommandCenter, AreaCommandCenter, Squad, SapperSquad, Radar
-    area VARCHAR(20) NOT NULL CHECK (area IN ('Center', 'North', 'South')), -- Determined by server on creation
+    area VARCHAR(20) NOT NULL CHECK (area IN ('Center', 'North', 'South')), -- Computed dynamically by server
     name VARCHAR(150), -- Display name for squads/centers
     description TEXT, -- Operational description
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Soldiers Table (7-digit IDs, names, assigned to squads)
+-- 2. Soldiers Table (7-digit IDs, names, flexible role, assigned to squads)
 CREATE TABLE soldiers (
     id VARCHAR(7) PRIMARY KEY, -- exactly 7 digits
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
-    is_sapper BOOLEAN DEFAULT FALSE
+    role VARCHAR(50) DEFAULT 'rifleman' -- e.g., 'sapper', 'medic', 'rifleman', 'recon'
 );
 
 -- 3. Live Entity Locations & State (Map Entities)
