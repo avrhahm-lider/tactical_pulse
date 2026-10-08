@@ -80,8 +80,9 @@ Entity
    * **Danger Zone Buffer**: Every threat displays a highlighted danger perimeter circle on the map (default **150 meters**).
    * **Proximity Alerts**: Instant tactical warning banners/alerts in the client UI when a new threat is reported within **2 km** of the unit.
    * RBAC enforcement:
-     * `immovable` threats can only be engaged/resolved by `SapperSquad` or Command Center.
-     * `movable` threat coordinates updated by `Radar`, detecting Squads, or Command Center.
+     * `immovable` threats (`explosive`): can only be engaged/resolved by `SapperSquad` or Command Center.
+     * `movable` ground threats (`personnel` terrorist group, `vehicle`): coordinates can be updated by regular `Squad`, `SapperSquad`, `Radar`, or Command Center.
+     * `movable` aerial threats (`drone`): telemetry (`lat`, `lon`, `altitude`) can strictly only be updated by `Radar` (or Command Center). Regular squads receive 403 Forbidden.
 7. **Threat Visual Lifecycle States**:
    * `unassigned`: Red active hazard icon with highlighted 150 m danger buffer circle.
    * `in_progress`: Yellow warning icon indicating an assigned squad is currently neutralizing/handling the threat.
@@ -106,8 +107,6 @@ Entity
    * Operational broadcast from Command Center to squads (by zone or global).
 3. **High-Frequency Live Cache**:
    * Redis pub/sub layer for sub-millisecond coordinate streaming if horizontal scaling is required.
-4. **Automated Radar Tracking**:
-   * Dynamic radar sweeps generating automated target telemetry for movable hostiles.
 
 ---
 

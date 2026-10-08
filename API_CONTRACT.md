@@ -20,13 +20,16 @@ The map of Israel is divided into three operational areas defined by latitude bo
 
 ## 2. Threat Handling Matrix (RBAC) & Lifecycle
 
-| Action | Immovable (IED, minefield, blockade) | Movable (Hostile UAV, armed vehicle, terrorist) |
-|---|---|---|
-| **Create (`POST /threats`)** | Any `Squad`, `SapperSquad`, or `CommandCenter` | `Radar`, `Squad`, or `CommandCenter` |
-| **Take Responsibility (`in_progress`)** | **`SapperSquad` only** (or Command Center) | Any `Squad`, `SapperSquad`, or `CommandCenter` |
-| **Update Position (`lat`, `lon`)** | Fixed (cannot move) | `Radar`, detecting Squad, or Command Center |
-| **Resolve (`resolved`)** | **`SapperSquad` only** (or Command Center) | Engaging Squad or Command Center |
-| **Deactivate (`inactive`)** | Command Center or assigned `SapperSquad` | Command Center or engaging Squad |
+| Action | Immovable (`explosive` IED) | Movable Ground (`personnel`, `vehicle`) | Movable Air (`drone` UAV) |
+|---|---|---|---|
+| **Create (`POST /threats`)** | Any `Squad`, `SapperSquad`, `CommandCenter` | Any `Squad`, `SapperSquad`, `Radar`, `CommandCenter` | `Radar`, `Squad`, `CommandCenter` |
+| **Take Responsibility (`in_progress`)** | **`SapperSquad` only** (or Command Center) | Any `Squad`, `SapperSquad` (or Command Center) | Any `Squad` or `CommandCenter` |
+| **Update Position (`lat`, `lon`)** | Fixed (cannot move) | **`Squad`**, `SapperSquad`, `Radar`, `CommandCenter` | **`Radar` only** (or Command Center) |
+| **Resolve (`resolved`)** | **`SapperSquad` only** (or Command Center) | Engaging Squad or Command Center | Engaging Squad or Command Center |
+| **Deactivate (`inactive`)** | Command Center or assigned `SapperSquad` | Command Center or engaging Squad | Command Center or engaging Squad |
+
+> **RBAC Security Rule for `PATCH /threats/{id}`:**
+> If `threat_type == "drone"` and caller role is a regular `Squad` / `SapperSquad` attempting to alter coordinates (`lat`, `lon`, `altitude`), the server strictly returns `403 Forbidden` (`"Only Radar or Command Center can update aerial drone telemetry"`). Moving ground forces (`personnel`, `vehicle`) can be updated directly by field squads upon visual contact.
 
 ### Threat Visual Lifecycle & Map Behavior:
 1. **`unassigned`**: Active threat. Rendered as a red hazard marker with a highlighted danger radius buffer (default 150m).
