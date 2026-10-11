@@ -171,7 +171,7 @@ All endpoints follow the unified Error Response Format defined in **Section 5**:
 
 * **POST `/admin/users`**
   * **Headers:** `Authorization: Bearer <JWT>` (Must have `role: "MainCommandCenter"` and `status: "active"`)
-  * **Description:** Creates a new squad, operational command center, or radar unit. Accepts initial coordinates (`lat`, `lon`), from which the server automatically calculates and assigns the `area` (`North`, `Center`, or `South`; for `MainCommandCenter` defaults to `'Global'`). For squads (`Squad`, `SapperSquad`), `soldiers` is required (array of objects with 7-digit ID, name, role); for command centers and radars, `soldiers` is optional. If any soldier has `role: "sapper"`, the unit's role is automatically assigned as `SapperSquad`. Automatically creates the initial record in `map_entities` for field units.
+  * **Description:** Creates a new squad, operational command center, or radar unit. Coordinates (`lat`, `lon` within operational bounds) are required for field units (`Squad`, `SapperSquad`, `Radar`), from which the server automatically calculates and assigns `area` (`North`, `Center`, or `South`). For `MainCommandCenter`, `area` is automatically assigned as `'Global'` (coordinates optional). For `AreaCommandCenter`, `area` can be passed explicitly (`North`, `Center`, `South`) or derived from `lat`. For squads (`Squad`, `SapperSquad`), `soldiers` is required (array of objects with 7-digit ID, name, role); for command centers and radars, `soldiers` is optional (defaults to `[]`). If any soldier has `role: "sapper"`, the unit's role is automatically assigned as `SapperSquad`. Automatically creates the initial record in `map_entities` for field units.
   * **Request Body:**
     ```json
     {
@@ -324,7 +324,7 @@ All endpoints follow the unified Error Response Format defined in **Section 5**:
 * **GET `/map/snapshot`**
   * **Headers:** `Authorization: Bearer <JWT>`
   * **Description:** Returns the active tactical snapshot filtered according to caller role, zone, and 20 km visibility radius rules.
-  * *Note:* The `squads` array contains all active tactical field units (roles: `Squad`, `SapperSquad`, `Radar`).
+  * *Note:* The `squads` array contains all active tactical field units (roles: `Squad`, `SapperSquad`, `Radar`). For units without personnel (e.g. Radars), `soldiers` defaults to `[]`.
   * **Response (200 OK):**
     ```json
     {
@@ -404,7 +404,8 @@ All endpoints follow the unified Error Response Format defined in **Section 5**:
 2. **`heartbeat`**
    * **Trigger:** Sent by client every **30 seconds** to signal active connection.
    * **Payload:** `{}` (empty object — user identity is derived from authenticated session).
-   * *Note: If no `heartbeat` or `location_update` is received for **60 seconds**, the unit is considered stale and rendered greyed out on tactical maps.*
+   * **Server action:** Updates `map_entities.updated_at = CURRENT_TIMESTAMP` for the sending unit.
+   * *Note: If neither `heartbeat` nor `location_update` is received for **60 seconds**, the unit is considered stale and rendered greyed out on tactical maps.*
 
 ### Server ➔ Client Events
 
