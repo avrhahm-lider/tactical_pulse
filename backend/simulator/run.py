@@ -33,7 +33,7 @@ def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
 
 
 async def simulate_movement(username: str = "squad_golani", password: str = "squad123", steps: int = 10):
-    print(f"🛰️  Starting Tactical Movement Simulator for unit: '{username}'")
+    print(f"[SIMULATOR] Starting Tactical Movement Simulator for unit: '{username}'")
     
     # 1. Login via REST
     async with httpx.AsyncClient() as client:
@@ -43,14 +43,14 @@ async def simulate_movement(username: str = "squad_golani", password: str = "squ
                 json={"username": username, "password": password},
             )
             if resp.status_code != 200:
-                print(f"❌ Login failed ({resp.status_code}): {resp.text}")
+                print(f"[ERROR] Login failed ({resp.status_code}): {resp.text}")
                 return
             data = resp.json()
             token = data["access_token"]
             user_info = data["user"]
-            print(f"✅ Authenticated as {user_info['name']} ({user_info['role']}, Sector: {user_info['area']})")
+            print(f"[OK] Authenticated as {user_info['name']} ({user_info['role']}, Sector: {user_info['area']})")
         except Exception as e:
-            print(f"❌ Connection to backend failed: {e}")
+            print(f"[ERROR] Connection to backend failed: {e}")
             return
 
     # 2. Connect via Socket.IO
@@ -58,15 +58,15 @@ async def simulate_movement(username: str = "squad_golani", password: str = "squ
 
     @sio.event
     async def connect():
-        print("🔗 Socket.IO connected successfully!")
+        print("[SOCKET] Socket.IO connected successfully!")
 
     @sio.event
     async def disconnect():
-        print("🔌 Socket.IO disconnected.")
+        print("[SOCKET] Socket.IO disconnected.")
 
     @sio.event
     async def squad_moved(data):
-        print(f"  📡 [RX: squad_moved] Unit {data['id'][:8]}... -> Lat: {data['lat']:.4f}, Lon: {data['lon']:.4f}, Heading: {data['heading']:.1f}°")
+        print(f"  [RX: squad_moved] Unit {data['id'][:8]}... -> Lat: {data['lat']:.4f}, Lon: {data['lon']:.4f}, Heading: {data['heading']:.1f} deg")
 
     try:
         await sio.connect(
@@ -75,11 +75,11 @@ async def simulate_movement(username: str = "squad_golani", password: str = "squ
             auth={"token": f"Bearer {token}"},
         )
     except Exception as e:
-        print(f"❌ Socket connection error: {e}")
+        print(f"[ERROR] Socket connection error: {e}")
         return
 
     # 3. Stream Waypoints
-    print("🚀 Streaming coordinates via Socket.IO...")
+    print("[STREAM] Streaming coordinates via Socket.IO...")
     total_points = len(WAYPOINTS)
     for i in range(min(steps, total_points)):
         current_lat, current_lon = WAYPOINTS[i]
@@ -91,17 +91,17 @@ async def simulate_movement(username: str = "squad_golani", password: str = "squ
             "lon": current_lon,
             "heading": round(heading, 1),
         }
-        print(f"📍 Step {i + 1}/{steps}: Emitting location_update {payload}")
+        print(f"[STEP {i + 1}/{steps}] Emitting location_update: Lat={current_lat}, Lon={current_lon}, Heading={payload['heading']}")
         await sio.emit("location_update", payload)
         await asyncio.sleep(1.0)
 
     # 4. Emit a heartbeat
-    print("💓 Emitting keep-alive heartbeat...")
+    print("[HEARTBEAT] Emitting keep-alive heartbeat...")
     await sio.emit("heartbeat", {})
     await asyncio.sleep(0.5)
 
     await sio.disconnect()
-    print("🏁 Simulation finished successfully!")
+    print("[DONE] Simulation finished successfully!")
 
 
 if __name__ == "__main__":
