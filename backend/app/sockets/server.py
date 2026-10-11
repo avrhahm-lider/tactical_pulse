@@ -35,7 +35,7 @@ def calculate_area_from_lat(lat: float) -> str:
 
 
 @sio.event
-async def connect(sid: str, environ: dict, auth: Optional[dict]):
+async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
     if not auth or "token" not in auth:
         return False
 
@@ -54,35 +54,42 @@ async def connect(sid: str, environ: dict, auth: Optional[dict]):
     except Exception:
         return False
 
-    async with async_session_maker() as session:
-        stmt = select(User).where(User.id == user_id)
-        res = await session.execute(stmt)
-        user = res.scalar_one_or_none()
+    try:
+        async with async_session_maker() as session:
+            stmt = select(User).where(User.id == user_id)
+            res = await session.execute(stmt)
+            user = res.scalar_one_or_none()
 
-        if not user or user.status != "active":
-            return False
+            if not user or user.status != "active":
+                return False
 
-        # Load initial coordinates if field unit
-        map_stmt = select(MapEntity).where(MapEntity.id == user_id)
-        map_res = await session.execute(map_stmt)
-        map_ent = map_res.scalar_one_or_none()
+            # Load initial coordinates if field unit
+            map_stmt = select(MapEntity).where(MapEntity.id == user_id)
+            map_res = await session.execute(map_stmt)
+            map_ent = map_res.scalar_one_or_none()
 
-        client_info = {
-            "user_id": user.id,
-            "username": user.username,
-            "role": user.role,
-            "area": user.area,
-            "lat": None,
-            "lon": None,
-        }
-        _connected_clients[sid] = client_info
-        await sio.save_session(sid, client_info)
+            client_info = {
+                "user_id": user.id,
+                "username": user.username,
+                "role": user.role,
+                "area": user.area,
+                "lat": None,
+                "lon": None,
+            }
+            _connected_clients[sid] = client_info
+            try:
+                await sio.save_session(sid, client_info)
+            except Exception:
+                pass
 
-    # Automatically join role & zone rooms
-    await sio.enter_room(sid, f"role_{user.role}")
-    if user.area:
-        await sio.enter_room(sid, f"zone_{user.area}")
-    return True
+        # Automatically join role & zone rooms
+        await sio.enter_room(sid, f"role_{user.role}")
+        if user.area:
+            await sio.enter_room(sid, f"zone_{user.area}")
+        return True
+    except Exception as e:
+        print(f"[CONNECT EXCEPTION] {type(e).__name__}: {e}")
+        return False
 
 
 @sio.event

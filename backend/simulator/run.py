@@ -4,8 +4,8 @@ import sys
 import httpx
 import socketio
 
-BASE_HTTP_URL = "http://localhost:8000/api/v1"
-BASE_SOCKET_URL = "http://localhost:8000"
+BASE_HTTP_URL = "http://127.0.0.1:8000/api/v1"
+BASE_SOCKET_URL = "http://127.0.0.1:8000"
 
 # Waypoints for movement simulation (Central sector towards coastal ridge)
 WAYPOINTS = [
@@ -50,7 +50,7 @@ async def simulate_movement(username: str = "squad_golani", password: str = "squ
             user_info = data["user"]
             print(f"[OK] Authenticated as {user_info['name']} ({user_info['role']}, Sector: {user_info['area']})")
         except Exception as e:
-            print(f"[ERROR] Connection to backend failed: {e}")
+            print(f"[ERROR] Connection to backend failed: {type(e).__name__}: {e}")
             return
 
     # 2. Connect via Socket.IO
@@ -75,7 +75,7 @@ async def simulate_movement(username: str = "squad_golani", password: str = "squ
             auth={"token": f"Bearer {token}"},
         )
     except Exception as e:
-        print(f"[ERROR] Socket connection error: {e}")
+        print(f"[ERROR] Socket connection error: {type(e).__name__}: {e}")
         return
 
     # 3. Stream Waypoints
