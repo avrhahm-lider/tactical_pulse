@@ -174,7 +174,7 @@ To ensure smooth parallel execution between **Backend Agent** and **Frontend Age
   * Client APIs & Leaflet: `lat, lon` (Latitude first).
   * PostGIS Geometry: `ST_MakePoint(lon, lat)` (Longitude first, standard WGS 84 / SRID 4326).
 * **Security**: JWT with refresh token rotation, rate limiting on authentication, bcrypt password hashing, audit logging (TLS/HTTPS deferred to Phase 2).
-* **Testing & Tools**: Pytest, Alembic migrations, Docker Compose.
+* **Testing & Tools**: Pytest, Supabase / Docker Compose.
 * **Ports**:
   * Backend API: `http://localhost:8000/api/v1`
   * Backend Socket: `http://localhost:8000` (`/socket.io`)
