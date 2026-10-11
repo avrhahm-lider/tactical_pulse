@@ -1,0 +1,223 @@
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
+from app.main import fastapi_app
+from app.db.seed import seed_database
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def setup_test_db():
+    # Ensure fresh seeded state before tests
+    await seed_database()
+
+
+@pytest.mark.asyncio
+async def test_auth_login_success():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "access_token" in data
+        assert "refresh_token" in data
+        assert data["token_type"] == "bearer"
+        assert data["user"]["role"] == "MainCommandCenter"
+        assert data["user"]["area"] == "Global"
+
+
+@pytest.mark.asyncio
+async def test_auth_login_invalid_credentials():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "wrong_password"},
+        )
+        assert resp.status_code == 401
+        data = resp.json()
+        assert data["error"]["code"] == "UNAUTHORIZED"
+
+
+@pytest.mark.asyncio
+async def test_auth_me_and_refresh():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. Login
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "command_north", "password": "command123"},
+        )
+        assert login_res.status_code == 200
+        tokens = login_res.json()
+        token = tokens["access_token"]
+        refresh_token = tokens["refresh_token"]
+
+        # 2. Get Me
+        me_res = await client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert me_res.status_code == 200
+        me_data = me_res.json()
+        assert me_data["username"] == "command_north"
+        assert me_data["area"] == "North"
+
+        # 3. Refresh Token
+        ref_res = await client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": refresh_token},
+        )
+        assert ref_res.status_code == 200
+        ref_data = ref_res.json()
+        assert "access_token" in ref_data
+        assert "refresh_token" in ref_data
+
+
+@pytest.mark.asyncio
+async def test_admin_users_management():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Login as Admin
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        admin_token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        # 1. List users
+        list_res = await client.get("/api/v1/admin/users", headers=headers)
+        assert list_res.status_code == 200
+        users = list_res.json()
+        assert len(users) >= 7
+
+        # 2. Create new SapperSquad (auto promoted by sapper in soldiers)
+        create_payload = {
+            "username": "squad_test_eod",
+            "password": "password123",
+            "role": "Squad",  # passed Squad, should auto-promote to SapperSquad
+            "name": "Test Engineering Unit",
+            "lat": 32.5000,
+            "lon": 34.9000,
+            "soldiers": [
+                {"id": "9999001", "name": "Test Soldier 1", "role": "rifleman"},
+                {"id": "9999002", "name": "Test Soldier 2", "role": "sapper"},
+            ],
+        }
+        create_res = await client.post("/api/v1/admin/users", json=create_payload, headers=headers)
+        assert create_res.status_code == 201
+        created_user = create_res.json()
+        assert created_user["role"] == "SapperSquad"
+        assert created_user["area"] == "Center"
+        new_user_id = created_user["id"]
+
+        # 3. Soft-deactivate unit
+        patch_res = await client.patch(
+            f"/api/v1/admin/users/{new_user_id}/status",
+            json={"status": "inactive"},
+            headers=headers,
+        )
+        assert patch_res.status_code == 200
+        assert patch_res.json()["status"] == "inactive"
+
+
+@pytest.mark.asyncio
+async def test_threats_rbac_and_lifecycle():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Login as SapperSquad (squad_paratroopers)
+        sapper_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "squad_paratroopers", "password": "squad123"},
+        )
+        sapper_token = sapper_res.json()["access_token"]
+        sapper_headers = {"Authorization": f"Bearer {sapper_token}"}
+
+        # Login as Regular Squad (squad_golani)
+        golani_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "squad_golani", "password": "squad123"},
+        )
+        golani_token = golani_res.json()["access_token"]
+        golani_headers = {"Authorization": f"Bearer {golani_token}"}
+
+        # 1. Create explosive threat
+        threat_payload = {
+            "name": "Test Minefield",
+            "threat_type": "explosive",
+            "type": "immovable",
+            "severity_level": "high",
+            "lat": 32.0860,
+            "lon": 34.7830,
+            "radius": 150.0,
+        }
+        create_res = await client.post("/api/v1/threats", json=threat_payload, headers=sapper_headers)
+        assert create_res.status_code == 201
+        threat_id = create_res.json()["id"]
+
+        # 2. Regular squad attempts to take responsibility for explosive threat -> FORBIDDEN
+        golani_take_res = await client.patch(
+            f"/api/v1/threats/{threat_id}",
+            json={"engagement_status": "in_progress"},
+            headers=golani_headers,
+        )
+        assert golani_take_res.status_code == 403
+
+        # 3. Sapper squad takes responsibility -> 200 OK
+        sapper_take_res = await client.patch(
+            f"/api/v1/threats/{threat_id}",
+            json={"engagement_status": "in_progress"},
+            headers=sapper_headers,
+        )
+        assert sapper_take_res.status_code == 200
+        assert sapper_take_res.json()["engagement_status"] == "in_progress"
+
+        # 4. Another attempt to take responsibility when already assigned -> 409 CONFLICT
+        conflict_res = await client.patch(
+            f"/api/v1/threats/{threat_id}",
+            json={"engagement_status": "in_progress"},
+            headers=sapper_headers,
+        )
+        assert conflict_res.status_code == 409
+        assert conflict_res.json()["error"]["code"] == "THREAT_ALREADY_ASSIGNED"
+
+        # 5. Attempt to reposition immovable threat -> 400 Bad Request
+        move_res = await client.patch(
+            f"/api/v1/threats/{threat_id}",
+            json={"lat": 32.0870, "lon": 34.7840},
+            headers=sapper_headers,
+        )
+        assert move_res.status_code == 400
+
+        # 6. Resolve threat by SapperSquad -> 200 OK
+        resolve_res = await client.patch(
+            f"/api/v1/threats/{threat_id}",
+            json={"engagement_status": "resolved"},
+            headers=sapper_headers,
+        )
+        assert resolve_res.status_code == 200
+        assert resolve_res.json()["engagement_status"] == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_map_snapshot():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Login as Admin (Global visibility)
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        snap_res = await client.get("/api/v1/map/snapshot", headers=headers)
+        assert snap_res.status_code == 200
+        snapshot = snap_res.json()
+        assert "squads" in snapshot
+        assert "threats" in snapshot
+        assert len(snapshot["squads"]) >= 3
+        assert len(snapshot["threats"]) >= 2
