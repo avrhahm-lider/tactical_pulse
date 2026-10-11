@@ -124,9 +124,9 @@ To ensure smooth parallel execution between **Backend Agent** and **Frontend Age
 
 ### Backend Agent Scope (`backend/mvp` branch)
 * **Milestone B1: Database & Core**
-  * PostgreSQL + PostGIS Docker Compose configuration.
-  * SQLAlchemy async models: `User`, `Soldier`, `MapEntity`, `Threat`.
-  * Alembic migration scripts.
+  * PostgreSQL + PostGIS (Supabase / Docker) configuration.
+  * SQLAlchemy async models: `User`, `Soldier`, `MapEntity`, `Threat`, `AuditLog`, `Message`.
+  * Automatic schema initialization (`Base.metadata.create_all`) and DDL SQL script.
   * Database seeder script (`seed.py`) with all test users, squads, and threats.
 * **Milestone B2: Auth & Admin API**
   * JWT generation, hashing (passlib/bcrypt), role & active status dependencies.

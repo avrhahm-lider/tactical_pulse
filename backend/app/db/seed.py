@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, delete
 from geoalchemy2.elements import WKTElement
 
-from app.db.postgres import async_session_maker
+from app.db.postgres import async_session_maker, init_db
 from app.core.security import hash_password
 from app.models.user import User
 from app.models.soldier import Soldier
@@ -14,7 +14,8 @@ from app.models.message import Message
 
 
 async def seed_database() -> None:
-    print("🌱 Seeding database according to API_CONTRACT.md Section 8...")
+    print("🌱 Ensuring tables exist and seeding database according to API_CONTRACT.md Section 8...")
+    await init_db()
     async with async_session_maker() as session:
         # Clear existing tactical data in dependency order
         await session.execute(delete(AuditLog))
