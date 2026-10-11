@@ -186,6 +186,20 @@ async def location_update(sid: str, data: dict):
     )
 
 
+import math
+
+
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * (math.sin(delta_lambda / 2.0) ** 2)
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return r * c
+
+
 async def broadcast_to_visibility_range(
     origin_lat: float,
     origin_lon: float,
@@ -199,8 +213,6 @@ async def broadcast_to_visibility_range(
     - AreaCommandCenter receives if event is in its assigned zone
     - Field units receive if within 20 km radius
     """
-    origin_point = ST_SetSRID(ST_MakePoint(origin_lon, origin_lat), 4326)
-
     for client_sid, info in list(_connected_clients.items()):
         role = info.get("role")
         area = info.get("area")
@@ -213,18 +225,9 @@ async def broadcast_to_visibility_range(
             client_lat = info.get("lat")
             client_lon = info.get("lon")
             if client_lat is not None and client_lon is not None:
-                # Check 20 km distance
-                async with async_session_maker() as session:
-                    stmt = select(
-                        ST_DWithin(
-                            cast(origin_point, Geography),
-                            cast(ST_SetSRID(ST_MakePoint(client_lon, client_lat), 4326), Geography),
-                            settings.VISIBILITY_RADIUS_METERS,
-                        )
-                    )
-                    res = await session.execute(stmt)
-                    if res.scalar():
-                        await sio.emit(event_name, payload, room=client_sid)
+                dist = haversine_distance_meters(origin_lat, origin_lon, client_lat, client_lon)
+                if dist <= settings.VISIBILITY_RADIUS_METERS:
+                    await sio.emit(event_name, payload, room=client_sid)
 
 
 async def broadcast_threat_event(event_name: str, threat_dict: dict):

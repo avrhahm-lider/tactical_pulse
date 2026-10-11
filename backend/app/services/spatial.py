@@ -112,6 +112,16 @@ async def get_visible_threats_query(caller: User, caller_coords: Optional[Tuple[
             stmt = stmt.where(zone_clause)
         return stmt
 
+    if caller.role == "Radar":
+        # Radar monitors aerial drone tracks or threats it registered
+        stmt = stmt.where(
+            or_(
+                Threat.threat_type == "drone",
+                Threat.created_by_id == caller.id,
+            )
+        )
+        return stmt
+
     # Field unit: within 20 km
     if caller_coords:
         caller_lat, caller_lon = caller_coords

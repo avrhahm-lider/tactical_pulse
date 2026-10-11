@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     PROXIMITY_ALERT_RADIUS_METERS: float = 2000.0
     DEFAULT_THREAT_RADIUS_METERS: float = 150.0
     
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "backend/.env"), extra="ignore")
 
 
 settings = Settings()

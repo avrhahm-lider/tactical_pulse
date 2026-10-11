@@ -257,12 +257,16 @@ async def simulate_radar_drones(radar_username: str = "radar_post_1", radar_pass
                     "lat": init_lat,
                     "lon": init_lon,
                 }
-                c_resp = await client.post(f"{BASE_HTTP_URL}/threats", json=create_payload, headers=headers)
-                if c_resp.status_code == 201:
-                    drone_id = c_resp.json()["id"]
-                    print(f"[RADAR] Reported NEW drone track: '{drone_name}' (Alt: {init_alt}m, ID: {drone_id[:8]}...)")
-                else:
-                    print(f"[RADAR] Failed to register drone '{drone_name}': {c_resp.text}")
+                try:
+                    c_resp = await client.post(f"{BASE_HTTP_URL}/threats", json=create_payload, headers=headers)
+                    if c_resp.status_code == 201:
+                        drone_id = c_resp.json()["id"]
+                        print(f"[RADAR] Reported NEW drone track: '{drone_name}' (Alt: {init_alt}m, ID: {drone_id[:8]}...)")
+                    else:
+                        print(f"[RADAR] Failed to register drone '{drone_name}': {c_resp.text}")
+                        continue
+                except Exception as cre:
+                    print(f"[RADAR] Drone registration error for '{drone_name}': {cre}")
                     continue
 
             drone_entities.append({
@@ -299,8 +303,11 @@ async def simulate_radar_drones(radar_username: str = "radar_post_1", radar_pass
                             json=patch_payload,
                             headers=headers,
                         )
-                        if patch_res.status_code == 200 and (step % 5 == 0 or step == 1):
-                            print(f"[RADAR] Track '{d['name']}' -> Lat: {lat:.5f}, Lon: {lon:.5f}, Alt: {alt}m")
+                        if patch_res.status_code == 200:
+                            if step % 5 == 0 or step == 1:
+                                print(f"[RADAR] Track '{d['name']}' -> Lat: {lat:.5f}, Lon: {lon:.5f}, Alt: {alt}m")
+                        else:
+                            print(f"[RADAR] Track '{d['name']}' update failed ({patch_res.status_code}): {patch_res.text}")
                     except Exception as pe:
                         print(f"[RADAR] Telemetry send error for {d['name']}: {pe}")
 
