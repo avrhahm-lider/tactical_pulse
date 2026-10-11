@@ -1,12 +1,12 @@
 import asyncio
-import socketio
+import math
 from datetime import datetime, timezone
-from uuid import UUID
 from typing import Dict, Any, Optional
-from sqlalchemy import select, and_, cast
-from geoalchemy2 import Geography
-from geoalchemy2.functions import ST_DWithin, ST_MakePoint, ST_SetSRID, ST_X, ST_Y
+from uuid import UUID
+import socketio
+from sqlalchemy import select
 from geoalchemy2.elements import WKTElement
+from geoalchemy2.functions import ST_X, ST_Y
 
 from app.core.config import settings
 from app.core.security import decode_token
@@ -142,13 +142,8 @@ async def location_update(sid: str, data: dict):
 
     client["lat"] = lat
     client["lon"] = lon
-
     new_area = calculate_area_from_lat(lat)
     now = datetime.now(timezone.utc)
-
-    # 1. Update in-memory unit state immediately
-    client["lat"] = lat
-    client["lon"] = lon
     old_area = client.get("area")
     client["area"] = new_area
 
@@ -233,9 +228,6 @@ async def location_update(sid: str, data: dict):
         pass
 
 
-import math
-
-
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 6371000.0
     phi1 = math.radians(lat1)
@@ -245,6 +237,44 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
     a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * (math.sin(delta_lambda / 2.0) ** 2)
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return r * c
+
+
+async def _process_squad_threat_breach(sq_sid: Optional[str], sq_id: str, sq_name: str, sq_lat: float, sq_lon: float, t: dict):
+    if t.get("status") == "inactive" or t.get("engagement_status") == "resolved":
+        return
+    t_lat, t_lon = t.get("lat"), t.get("lon")
+    if t_lat is None or t_lon is None:
+        return
+
+    radius = float(t.get("radius") or 150.0)
+    t_id = str(t.get("id"))
+    breach_key = f"{sq_id}_{t_id}"
+    dist = haversine_distance_meters(sq_lat, sq_lon, t_lat, t_lon)
+
+    if dist <= radius:
+        if breach_key not in _active_danger_breaches:
+            _active_danger_breaches.add(breach_key)
+            if sq_sid:
+                await sio.emit(
+                    "danger_zone_alert",
+                    {
+                        "id": breach_key,
+                        "threat_id": t_id,
+                        "threat_name": t.get("name"),
+                        "threat_type": t.get("threat_type"),
+                        "severity_level": t.get("severity_level"),
+                        "squad_id": sq_id,
+                        "squad_name": sq_name,
+                        "distance_meters": round(dist, 1),
+                        "danger_radius_meters": radius,
+                        "message": f"CRITICAL: {sq_name} is INSIDE danger perimeter of {t.get('name')} ({round(dist, 1)}m <= {radius}m)!",
+                    },
+                    room=sq_sid,
+                )
+    elif breach_key in _active_danger_breaches:
+        _active_danger_breaches.remove(breach_key)
+        if sq_sid:
+            await sio.emit("danger_zone_cleared", {"id": breach_key, "squad_id": sq_id, "threat_id": t_id}, room=sq_sid)
 
 
 async def check_and_broadcast_danger_alerts(
@@ -258,87 +288,26 @@ async def check_and_broadcast_danger_alerts(
     Clears the breach and notifies when the squad exits the danger zone.
     """
     if squad_info and squad_info.get("lat") is not None and squad_info.get("lon") is not None:
-        sq_lat = squad_info["lat"]
-        sq_lon = squad_info["lon"]
         sq_id = str(squad_info.get("user_id"))
         sq_name = squad_info.get("username", "Squad")
-
         for t in list(_active_threats_cache.values()):
-            if t.get("status") == "inactive" or t.get("engagement_status") == "resolved":
-                continue
-            t_lat = t.get("lat")
-            t_lon = t.get("lon")
-            if t_lat is None or t_lon is None:
-                continue
-
-            radius = float(t.get("radius") or 150.0)
-            t_id = str(t.get("id"))
-            breach_key = f"{sq_id}_{t_id}"
-            dist = haversine_distance_meters(sq_lat, sq_lon, t_lat, t_lon)
-
-            if dist <= radius:
-                # Trigger alert ONCE upon intrusion into the danger zone
-                if breach_key not in _active_danger_breaches:
-                    _active_danger_breaches.add(breach_key)
-                    alert_payload = {
-                        "id": breach_key,
-                        "threat_id": t_id,
-                        "threat_name": t.get("name"),
-                        "threat_type": t.get("threat_type"),
-                        "severity_level": t.get("severity_level"),
-                        "squad_id": sq_id,
-                        "squad_name": sq_name,
-                        "distance_meters": round(dist, 1),
-                        "danger_radius_meters": radius,
-                        "message": f"CRITICAL: {sq_name} is INSIDE danger perimeter of {t.get('name')} ({round(dist, 1)}m <= {radius}m)!",
-                    }
-                    if squad_sid:
-                        await sio.emit("danger_zone_alert", alert_payload, room=squad_sid)
-            else:
-                # Squad has exited the danger zone -> clear breach state
-                if breach_key in _active_danger_breaches:
-                    _active_danger_breaches.remove(breach_key)
-                    if squad_sid:
-                        await sio.emit("danger_zone_cleared", {"id": breach_key, "squad_id": sq_id, "threat_id": t_id}, room=squad_sid)
+            await _process_squad_threat_breach(squad_sid, sq_id, sq_name, squad_info["lat"], squad_info["lon"], t)
 
     elif threat_dict and threat_dict.get("lat") is not None and threat_dict.get("lon") is not None:
         if threat_dict.get("status") != "inactive" and threat_dict.get("engagement_status") != "resolved":
-            t_lat = threat_dict["lat"]
-            t_lon = threat_dict["lon"]
-            radius = float(threat_dict.get("radius") or 150.0)
-            t_id = str(threat_dict.get("id"))
-            t_name = threat_dict.get("name")
-
             for c_sid, c_info in list(_connected_clients.items()):
                 if c_info.get("role") in ["Squad", "SapperSquad"]:
                     sq_lat = c_info.get("lat")
                     sq_lon = c_info.get("lon")
                     if sq_lat is not None and sq_lon is not None:
-                        sq_id = str(c_info.get("user_id"))
-                        sq_name = c_info.get("username", "Squad")
-                        breach_key = f"{sq_id}_{t_id}"
-                        dist = haversine_distance_meters(sq_lat, sq_lon, t_lat, t_lon)
-
-                        if dist <= radius:
-                            if breach_key not in _active_danger_breaches:
-                                _active_danger_breaches.add(breach_key)
-                                alert_payload = {
-                                    "id": breach_key,
-                                    "threat_id": t_id,
-                                    "threat_name": t_name,
-                                    "threat_type": threat_dict.get("threat_type"),
-                                    "severity_level": threat_dict.get("severity_level"),
-                                    "squad_id": sq_id,
-                                    "squad_name": sq_name,
-                                    "distance_meters": round(dist, 1),
-                                    "danger_radius_meters": radius,
-                                    "message": f"CRITICAL: {sq_name} is INSIDE danger perimeter of {t_name} ({round(dist, 1)}m <= {radius}m)!",
-                                }
-                                await sio.emit("danger_zone_alert", alert_payload, room=c_sid)
-                        else:
-                            if breach_key in _active_danger_breaches:
-                                _active_danger_breaches.remove(breach_key)
-                                await sio.emit("danger_zone_cleared", {"id": breach_key, "squad_id": sq_id, "threat_id": t_id}, room=c_sid)
+                        await _process_squad_threat_breach(
+                            c_sid,
+                            str(c_info.get("user_id")),
+                            c_info.get("username", "Squad"),
+                            sq_lat,
+                            sq_lon,
+                            threat_dict,
+                        )
 
 
 async def broadcast_to_visibility_range(

@@ -1,8 +1,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
-from sqlalchemy import select, delete
+from sqlalchemy import delete
 from geoalchemy2.elements import WKTElement
 
 # Ensure backend root is on sys.path
