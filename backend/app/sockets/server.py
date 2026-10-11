@@ -14,6 +14,7 @@ from app.db.postgres import async_session_maker
 from app.models.user import User
 from app.models.map_entity import MapEntity
 from app.models.threat import Threat
+from app.services.spatial import calculate_area_from_lat
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
@@ -29,16 +30,6 @@ _connected_clients: Dict[str, Dict[str, Any]] = {}
 # Active threats cache in memory for instantaneous danger zone checks without database queries
 _active_threats_cache: Dict[str, dict] = {}
 _active_danger_breaches: set = set()
-
-
-
-def calculate_area_from_lat(lat: float) -> str:
-    if lat >= settings.LAT_NORTH_MIN:
-        return "North"
-    elif lat >= settings.LAT_CENTER_MIN:
-        return "Center"
-    else:
-        return "South"
 
 
 @sio.event
@@ -74,11 +65,6 @@ async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
     }
     _connected_clients[sid] = client_info
 
-    try:
-        await sio.save_session(sid, client_info)
-    except Exception:
-        pass
-
     # Automatically join role & zone rooms after handshake completes
     async def _join_rooms():
         await asyncio.sleep(0.05)
@@ -110,13 +96,16 @@ async def heartbeat(sid: str, data: dict):
     if not client:
         return
 
-    async with async_session_maker() as session:
-        stmt = select(MapEntity).where(MapEntity.id == client["user_id"])
-        res = await session.execute(stmt)
-        map_ent = res.scalar_one_or_none()
-        if map_ent:
-            map_ent.updated_at = datetime.now(timezone.utc)
-            await session.commit()
+    try:
+        async with async_session_maker() as session:
+            stmt = select(MapEntity).where(MapEntity.id == client["user_id"])
+            res = await session.execute(stmt)
+            map_ent = res.scalar_one_or_none()
+            if map_ent:
+                map_ent.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+    except Exception:
+        pass
 
 
 @sio.event

@@ -179,7 +179,12 @@ async def refresh_token_endpoint(
             message="User associated with refresh token is invalid or inactive",
         )
 
-    extra_claims = {"role": user.role, "area": user.area}
+    extra_claims = {
+        "role": user.role,
+        "area": user.area,
+        "username": user.username,
+        "name": user.name,
+    }
     new_access_token = create_access_token(subject=str(user.id), extra_claims=extra_claims)
     new_refresh_token = create_refresh_token(subject=str(user.id))
 

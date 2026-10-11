@@ -23,11 +23,7 @@ async def get_current_user(
         user_id_str = payload.get("sub")
         token_type = payload.get("type")
         if not user_id_str or token_type != "access":
-            raise AppException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                code="UNAUTHORIZED",
-                message="Invalid access token",
-            )
+            raise ValueError("Invalid access token type or missing subject")
         user_id = UUID(user_id_str)
     except Exception:
         raise AppException(

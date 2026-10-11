@@ -14,21 +14,11 @@ from app.schemas.threat import ThreatCreate, ThreatUpdate, ThreatResponse
 from app.core.errors import AppException
 from app.core.config import settings
 from app.services.audit import log_audit_event
-from app.services.spatial import get_caller_coordinates, get_visible_threats_query
+from app.services.spatial import get_caller_coordinates, get_visible_threats_query, is_lat_in_area
 from app.api.dependencies import get_current_user
 from app.sockets.server import broadcast_threat_event
 
 router = APIRouter(prefix="/threats", tags=["Threats Management"])
-
-
-def is_lat_in_area(lat: float, area: str) -> bool:
-    if area == "North":
-        return lat >= settings.LAT_NORTH_MIN
-    elif area == "Center":
-        return settings.LAT_CENTER_MIN <= lat < settings.LAT_NORTH_MIN
-    elif area == "South":
-        return settings.LAT_MIN <= lat < settings.LAT_CENTER_MIN
-    return True
 
 
 @router.get("", response_model=List[ThreatResponse])
@@ -187,6 +177,12 @@ async def update_threat(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
                 message=f"AreaCommandCenter '{current_user.area}' cannot modify threats outside its assigned sector",
+            )
+        if req.lat is not None and not is_lat_in_area(req.lat, current_user.area):
+            raise AppException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="FORBIDDEN",
+                message=f"AreaCommandCenter '{current_user.area}' cannot relocate threats outside its assigned sector",
             )
 
     # 2. Field Unit Proximity Restriction (20 km for ground tactical units; radar monitors aerial drones)

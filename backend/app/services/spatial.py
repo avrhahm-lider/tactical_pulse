@@ -23,6 +23,26 @@ async def get_caller_coordinates(session: AsyncSession, user_id: UUID) -> Option
     return None
 
 
+def calculate_area_from_lat(lat: float) -> str:
+    """Returns tactical sector ('North', 'Center', or 'South') based on latitude."""
+    if lat >= settings.LAT_NORTH_MIN:
+        return "North"
+    elif lat >= settings.LAT_CENTER_MIN:
+        return "Center"
+    return "South"
+
+
+def is_lat_in_area(lat: float, area: str) -> bool:
+    """Checks whether a given latitude falls within the specified theater sector."""
+    if area == "North":
+        return lat >= settings.LAT_NORTH_MIN
+    elif area == "Center":
+        return settings.LAT_CENTER_MIN <= lat < settings.LAT_NORTH_MIN
+    elif area == "South":
+        return settings.LAT_MIN <= lat < settings.LAT_CENTER_MIN
+    return True
+
+
 def get_zone_clause_for_geom(geom_column, area: str):
     """Generates latitude boundary condition for a given geometry column."""
     lat_expr = ST_Y(geom_column)

@@ -14,21 +14,12 @@ from app.schemas.user import UserCreate, UserStatusUpdate, AdminUserResponse, Us
 from app.schemas.soldier import SoldierResponse
 from app.core.security import hash_password
 from app.core.errors import AppException
-from app.core.config import settings
 from app.services.audit import log_audit_event
+from app.services.spatial import calculate_area_from_lat
 from app.api.dependencies import require_main_command
 from app.sockets.server import broadcast_unit_status_changed
 
 router = APIRouter(prefix="/admin", tags=["Administration"])
-
-
-def calculate_area_from_lat(lat: float) -> str:
-    if lat >= settings.LAT_NORTH_MIN:
-        return "North"
-    elif lat >= settings.LAT_CENTER_MIN:
-        return "Center"
-    else:
-        return "South"
 
 
 @router.get("/users", response_model=List[AdminUserResponse])
