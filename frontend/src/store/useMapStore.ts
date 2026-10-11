@@ -27,13 +27,10 @@ interface MapState {
   isPickingLocationOnMap: boolean
   pickedLocation: { lat: number; lon: number } | null
   proximityAlerts: Threat[]
-<<<<<<< HEAD
   dangerZoneAlerts: DangerZoneAlert[]
   dismissedDangerAlertIds: string[]
-=======
   isThreatModalOpen: boolean
   selectedZoneFilter: 'Global' | 'North' | 'Center' | 'South'
->>>>>>> 07a3ccd (fix(map): enable map click alert opening, regional headquarters markers, and manager zone controls)
 
   loadSnapshot: () => Promise<void>
   updateSquadPosition: (payload: SquadMovedPayload, currentUserId?: string) => void
@@ -61,13 +58,10 @@ export const useMapStore = create<MapState>((set, get) => ({
   isPickingLocationOnMap: false,
   pickedLocation: null,
   proximityAlerts: [],
-<<<<<<< HEAD
   dangerZoneAlerts: [],
   dismissedDangerAlertIds: [],
-=======
   isThreatModalOpen: false,
   selectedZoneFilter: 'Global',
->>>>>>> 07a3ccd (fix(map): enable map click alert opening, regional headquarters markers, and manager zone controls)
 
   loadSnapshot: async () => {
     set({ isLoading: true, error: null })
