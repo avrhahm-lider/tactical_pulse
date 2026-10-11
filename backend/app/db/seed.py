@@ -1,7 +1,12 @@
 import asyncio
+import os
+import sys
 from datetime import datetime, timezone
 from sqlalchemy import select, delete
 from geoalchemy2.elements import WKTElement
+
+# Ensure backend root is on sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from app.db.postgres import async_session_maker, init_db
 from app.core.security import hash_password
@@ -14,7 +19,7 @@ from app.models.message import Message
 
 
 async def seed_database() -> None:
-    print("🌱 Ensuring tables exist and seeding database according to API_CONTRACT.md Section 8...")
+    print("[SEED] Ensuring tables exist and seeding database according to API_CONTRACT.md...")
     await init_db()
     async with async_session_maker() as session:
         # Clear existing tactical data in dependency order
@@ -171,7 +176,7 @@ async def seed_database() -> None:
         session.add(audit_init)
 
         await session.commit()
-        print("✅ Database seeding complete! All users, squads, soldiers, and threats ready.")
+        print("[SUCCESS] Database seeding complete! All users, squads, soldiers, and threats ready.")
 
 
 if __name__ == "__main__":

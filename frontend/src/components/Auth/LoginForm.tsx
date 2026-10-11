@@ -3,18 +3,18 @@ import { Shield, Lock, User, AlertCircle, ChevronRight, Terminal } from 'lucide-
 import { useAuthStore } from '../../store/useAuthStore'
 
 const DEMO_ACCOUNTS = [
-  { username: 'admin', role: 'MainCommandCenter', label: 'Main Command (Global)', badge: 'GLOBAL' },
-  { username: 'command_north', role: 'AreaCommandCenter', label: 'North Command', badge: 'NORTH' },
-  { username: 'command_center', role: 'AreaCommandCenter', label: 'Center Command', badge: 'CENTER' },
-  { username: 'command_south', role: 'AreaCommandCenter', label: 'South Command', badge: 'SOUTH' },
-  { username: 'squad_golani', role: 'Squad', label: 'Golani Tactical Squad', badge: 'FIELD' },
-  { username: 'squad_paratroopers', role: 'SapperSquad', label: 'Paratroopers EOD Sapper', badge: 'SAPPER' },
-  { username: 'radar_post_1', role: 'Radar', label: 'Radar Monitoring Unit', badge: 'RADAR' },
+  { username: 'admin', password: 'admin123', role: 'MainCommandCenter', label: 'Main Command (Global)', badge: 'GLOBAL' },
+  { username: 'command_north', password: 'command123', role: 'AreaCommandCenter', label: 'North Command', badge: 'NORTH' },
+  { username: 'command_center', password: 'command123', role: 'AreaCommandCenter', label: 'Center Command', badge: 'CENTER' },
+  { username: 'command_south', password: 'command123', role: 'AreaCommandCenter', label: 'South Command', badge: 'SOUTH' },
+  { username: 'squad_golani', password: 'squad123', role: 'Squad', label: 'Golani Tactical Squad', badge: 'FIELD' },
+  { username: 'squad_paratroopers', password: 'squad123', role: 'SapperSquad', label: 'Paratroopers EOD Sapper', badge: 'SAPPER' },
+  { username: 'radar_post_1', password: 'radar123', role: 'Radar', label: 'Radar Monitoring Unit', badge: 'RADAR' },
 ]
 
 export const LoginForm: React.FC = () => {
   const [username, setUsername] = useState('command_north')
-  const [password, setPassword] = useState('secret_password')
+  const [password, setPassword] = useState('command123')
   const { login, isLoading, error, clearError } = useAuthStore()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -23,9 +23,9 @@ export const LoginForm: React.FC = () => {
     await login(username, password)
   }
 
-  const handleSelectDemo = (accUsername: string) => {
-    setUsername(accUsername)
-    setPassword('secret_password')
+  const handleSelectDemo = (acc: (typeof DEMO_ACCOUNTS)[number]) => {
+    setUsername(acc.username)
+    setPassword(acc.password)
     clearError()
   }
 
@@ -137,7 +137,7 @@ export const LoginForm: React.FC = () => {
               <button
                 key={acc.username}
                 type="button"
-                onClick={() => handleSelectDemo(acc.username)}
+                onClick={() => handleSelectDemo(acc)}
                 className={`text-left p-2 rounded-md border text-xs font-mono transition-colors flex items-center justify-between ${
                   username === acc.username
                     ? 'bg-cyan-950/70 border-cyan-500 text-cyan-300'
