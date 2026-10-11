@@ -43,7 +43,7 @@ export function connectSocket(token: string, currentUserId?: string): Socket {
 
   // Listeners matching API_CONTRACT.md
   socket.on('squad_moved', (payload: SquadMovedPayload) => {
-    useMapStore.getState().updateSquadPosition(payload)
+    useMapStore.getState().updateSquadPosition(payload, currentUserId)
   })
 
   socket.on('threat_created', (payload: Threat) => {
@@ -52,6 +52,10 @@ export function connectSocket(token: string, currentUserId?: string): Socket {
 
   socket.on('threat_updated', (payload: Threat) => {
     useMapStore.getState().addOrUpdateThreat(payload, currentUserId)
+  })
+
+  socket.on('danger_zone_alert', (payload: any) => {
+    useMapStore.getState().addDangerZoneAlert(payload)
   })
 
   socket.on('unit_status_changed', (payload: UnitStatusChangedPayload) => {

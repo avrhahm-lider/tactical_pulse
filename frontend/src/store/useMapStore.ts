@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../services/api'
-import type { MapSnapshot, Squad, Threat, SquadMovedPayload } from '../types'
+import type { MapSnapshot, Squad, Threat, SquadMovedPayload, DangerZoneAlert } from '../types'
 
 // Haversine distance in meters
 export function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -27,12 +27,15 @@ interface MapState {
   isPickingLocationOnMap: boolean
   pickedLocation: { lat: number; lon: number } | null
   proximityAlerts: Threat[]
+  dangerZoneAlerts: DangerZoneAlert[]
 
   loadSnapshot: () => Promise<void>
-  updateSquadPosition: (payload: SquadMovedPayload) => void
+  updateSquadPosition: (payload: SquadMovedPayload, currentUserId?: string) => void
   removeSquad: (squadId: string) => void
   addOrUpdateThreat: (threat: Threat, currentUserId?: string) => void
   removeThreat: (threatId: string) => void
+  addDangerZoneAlert: (alert: DangerZoneAlert) => void
+  dismissDangerZoneAlert: (alertId: string) => void
   setSelectedEntity: (entity: { type: 'squad' | 'threat'; id: string } | null) => void
   setIsPickingLocationOnMap: (isPicking: boolean) => void
   setPickedLocation: (loc: { lat: number; lon: number } | null) => void
@@ -49,6 +52,7 @@ export const useMapStore = create<MapState>((set, get) => ({
   isPickingLocationOnMap: false,
   pickedLocation: null,
   proximityAlerts: [],
+  dangerZoneAlerts: [],
 
   loadSnapshot: async () => {
     set({ isLoading: true, error: null })
@@ -75,21 +79,77 @@ export const useMapStore = create<MapState>((set, get) => ({
     }
   },
 
-  updateSquadPosition: (payload) => {
+  updateSquadPosition: (payload, currentUserId) => {
     set((state) => {
       const existing = state.squads[payload.id]
       if (!existing) return state
+
+      const updatedSquad: Squad = {
+        ...existing,
+        lat: payload.lat,
+        lon: payload.lon,
+        heading: payload.heading,
+        updated_at: payload.updated_at,
+      }
+
+      const updatedSquads = {
+        ...state.squads,
+        [payload.id]: updatedSquad,
+      }
+
+      let updatedDangerAlerts = [...state.dangerZoneAlerts]
+      let updatedProximityAlerts = [...state.proximityAlerts]
+
+      // Check danger zones for this moving squad against all active threats
+      Object.values(state.threats).forEach((threat) => {
+        if (threat.status === 'inactive' || threat.engagement_status === 'resolved') {
+          return
+        }
+
+        const dist = calculateDistanceMeters(payload.lat, payload.lon, threat.lat, threat.lon)
+        const dangerRadius = threat.radius || 150.0
+        const alertKey = `${payload.id}_${threat.id}`
+
+        if (dist <= dangerRadius) {
+          const existingAlertIndex = updatedDangerAlerts.findIndex((a) => a.id === alertKey)
+          const alertObj: DangerZoneAlert = {
+            id: alertKey,
+            threat_id: threat.id,
+            threat_name: threat.name,
+            threat_type: threat.threat_type,
+            severity_level: threat.severity_level,
+            squad_id: payload.id,
+            squad_name: updatedSquad.name,
+            distance_meters: Math.round(dist),
+            danger_radius_meters: dangerRadius,
+            message: `CRITICAL ALERT: ${updatedSquad.name} is INSIDE danger perimeter of ${threat.name} (${Math.round(dist)}m <= ${dangerRadius}m)!`,
+            timestamp: Date.now(),
+          }
+
+          if (existingAlertIndex >= 0) {
+            updatedDangerAlerts[existingAlertIndex] = alertObj
+          } else {
+            updatedDangerAlerts.push(alertObj)
+          }
+        } else {
+          updatedDangerAlerts = updatedDangerAlerts.filter((a) => a.id !== alertKey)
+        }
+
+        if (currentUserId && currentUserId === payload.id) {
+          if (dist <= 2000) {
+            if (!updatedProximityAlerts.some((t) => t.id === threat.id)) {
+              updatedProximityAlerts.push(threat)
+            }
+          } else {
+            updatedProximityAlerts = updatedProximityAlerts.filter((t) => t.id !== threat.id)
+          }
+        }
+      })
+
       return {
-        squads: {
-          ...state.squads,
-          [payload.id]: {
-            ...existing,
-            lat: payload.lat,
-            lon: payload.lon,
-            heading: payload.heading,
-            updated_at: payload.updated_at,
-          },
-        },
+        squads: updatedSquads,
+        dangerZoneAlerts: updatedDangerAlerts,
+        proximityAlerts: updatedProximityAlerts,
       }
     })
   },
@@ -100,7 +160,11 @@ export const useMapStore = create<MapState>((set, get) => ({
       delete squads[squadId]
       const selectedEntity =
         state.selectedEntity?.id === squadId ? null : state.selectedEntity
-      return { squads, selectedEntity }
+      return {
+        squads,
+        selectedEntity,
+        dangerZoneAlerts: state.dangerZoneAlerts.filter((a) => a.squad_id !== squadId),
+      }
     })
   },
 
@@ -109,25 +173,63 @@ export const useMapStore = create<MapState>((set, get) => ({
       if (threat.status === 'inactive') {
         const threats = { ...state.threats }
         delete threats[threat.id]
-        const proximityAlerts = state.proximityAlerts.filter((t) => t.id !== threat.id)
-        return { threats, proximityAlerts }
-      }
-
-      const updatedThreats = { ...state.threats, [threat.id]: threat }
-      let proximityAlerts = [...state.proximityAlerts]
-
-      // Check proximity if current user is a squad on the map
-      if (currentUserId && state.squads[currentUserId]) {
-        const mySquad = state.squads[currentUserId]
-        const dist = calculateDistanceMeters(mySquad.lat, mySquad.lon, threat.lat, threat.lon)
-        if (dist <= 2000 && threat.engagement_status !== 'resolved') {
-          if (!proximityAlerts.some((t) => t.id === threat.id)) {
-            proximityAlerts.push(threat)
-          }
+        return {
+          threats,
+          proximityAlerts: state.proximityAlerts.filter((t) => t.id !== threat.id),
+          dangerZoneAlerts: state.dangerZoneAlerts.filter((a) => a.threat_id !== threat.id),
         }
       }
 
-      return { threats: updatedThreats, proximityAlerts }
+      const updatedThreats = { ...state.threats, [threat.id]: threat }
+      let updatedDangerAlerts = [...state.dangerZoneAlerts]
+      let updatedProximityAlerts = [...state.proximityAlerts]
+
+      Object.values(state.squads).forEach((squad) => {
+        const dist = calculateDistanceMeters(squad.lat, squad.lon, threat.lat, threat.lon)
+        const dangerRadius = threat.radius || 150.0
+        const alertKey = `${squad.id}_${threat.id}`
+
+        if (dist <= dangerRadius && threat.engagement_status !== 'resolved') {
+          const existingAlertIndex = updatedDangerAlerts.findIndex((a) => a.id === alertKey)
+          const alertObj: DangerZoneAlert = {
+            id: alertKey,
+            threat_id: threat.id,
+            threat_name: threat.name,
+            threat_type: threat.threat_type,
+            severity_level: threat.severity_level,
+            squad_id: squad.id,
+            squad_name: squad.name,
+            distance_meters: Math.round(dist),
+            danger_radius_meters: dangerRadius,
+            message: `CRITICAL ALERT: ${squad.name} is INSIDE danger perimeter of ${threat.name} (${Math.round(dist)}m <= ${dangerRadius}m)!`,
+            timestamp: Date.now(),
+          }
+
+          if (existingAlertIndex >= 0) {
+            updatedDangerAlerts[existingAlertIndex] = alertObj
+          } else {
+            updatedDangerAlerts.push(alertObj)
+          }
+        } else {
+          updatedDangerAlerts = updatedDangerAlerts.filter((a) => a.id !== alertKey)
+        }
+
+        if (currentUserId && squad.id === currentUserId) {
+          if (dist <= 2000 && threat.engagement_status !== 'resolved') {
+            if (!updatedProximityAlerts.some((t) => t.id === threat.id)) {
+              updatedProximityAlerts.push(threat)
+            }
+          } else {
+            updatedProximityAlerts = updatedProximityAlerts.filter((t) => t.id !== threat.id)
+          }
+        }
+      })
+
+      return {
+        threats: updatedThreats,
+        dangerZoneAlerts: updatedDangerAlerts,
+        proximityAlerts: updatedProximityAlerts,
+      }
     })
   },
 
@@ -138,8 +240,27 @@ export const useMapStore = create<MapState>((set, get) => ({
       return {
         threats,
         proximityAlerts: state.proximityAlerts.filter((t) => t.id !== threatId),
+        dangerZoneAlerts: state.dangerZoneAlerts.filter((a) => a.threat_id !== threatId),
       }
     })
+  },
+
+  addDangerZoneAlert: (alert) => {
+    set((state) => {
+      const existingIdx = state.dangerZoneAlerts.findIndex((a) => a.id === alert.id)
+      if (existingIdx >= 0) {
+        const next = [...state.dangerZoneAlerts]
+        next[existingIdx] = alert
+        return { dangerZoneAlerts: next }
+      }
+      return { dangerZoneAlerts: [alert, ...state.dangerZoneAlerts] }
+    })
+  },
+
+  dismissDangerZoneAlert: (alertId) => {
+    set((state) => ({
+      dangerZoneAlerts: state.dangerZoneAlerts.filter((a) => a.id !== alertId),
+    }))
   },
 
   setSelectedEntity: (selectedEntity) => set({ selectedEntity }),

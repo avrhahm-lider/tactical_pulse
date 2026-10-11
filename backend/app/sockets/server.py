@@ -5,7 +5,7 @@ from uuid import UUID
 from typing import Dict, Any, Optional
 from sqlalchemy import select, and_, cast
 from geoalchemy2 import Geography
-from geoalchemy2.functions import ST_DWithin, ST_MakePoint, ST_SetSRID
+from geoalchemy2.functions import ST_DWithin, ST_MakePoint, ST_SetSRID, ST_X, ST_Y
 from geoalchemy2.elements import WKTElement
 
 from app.core.config import settings
@@ -13,6 +13,7 @@ from app.core.security import decode_token
 from app.db.postgres import async_session_maker
 from app.models.user import User
 from app.models.map_entity import MapEntity
+from app.models.threat import Threat
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
@@ -24,6 +25,10 @@ sio = socketio.AsyncServer(
 # Active connected client sessions: sid -> dict
 # {"user_id": UUID, "username": str, "role": str, "area": str, "lat": float, "lon": float}
 _connected_clients: Dict[str, Dict[str, Any]] = {}
+
+# Active threats cache in memory for instantaneous danger zone checks without database queries
+_active_threats_cache: Dict[str, dict] = {}
+
 
 
 def calculate_area_from_lat(lat: float) -> str:
@@ -161,8 +166,24 @@ async def location_update(sid: str, data: dict):
             await sio.enter_room(sid, f"zone_{new_area}")
             client["area"] = new_area
 
-        client["lat"] = lat
-        client["lon"] = lon
+        # Preload _active_threats_cache if empty
+        if not _active_threats_cache:
+            threats_q = await session.execute(
+                select(Threat, ST_Y(Threat.geom), ST_X(Threat.geom)).where(Threat.status == "active")
+            )
+            for t, t_lat, t_lon in threats_q.all():
+                _active_threats_cache[str(t.id)] = {
+                    "id": str(t.id),
+                    "name": t.name,
+                    "threat_type": t.threat_type,
+                    "severity_level": t.severity_level,
+                    "engagement_status": t.engagement_status,
+                    "radius": t.radius,
+                    "lat": t_lat,
+                    "lon": t_lon,
+                    "altitude": t.altitude,
+                    "status": t.status,
+                }
 
         await session.commit()
 
@@ -185,6 +206,9 @@ async def location_update(sid: str, data: dict):
         payload=squad_moved_payload,
     )
 
+    # Check if squad is inside any active danger zones
+    await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
+
 
 import math
 
@@ -198,6 +222,88 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
     a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * (math.sin(delta_lambda / 2.0) ** 2)
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return r * c
+
+
+async def check_and_broadcast_danger_alerts(
+    squad_sid: Optional[str] = None,
+    squad_info: Optional[dict] = None,
+    threat_dict: Optional[dict] = None,
+):
+    """
+    Checks if a field squad is inside a threat's danger radius (dist <= radius)
+    and broadcasts 'danger_zone_alert' to the squad and all Command Centers.
+    """
+    alerts = []
+
+    if squad_info and squad_info.get("lat") is not None and squad_info.get("lon") is not None:
+        sq_lat = squad_info["lat"]
+        sq_lon = squad_info["lon"]
+        sq_id = str(squad_info.get("user_id"))
+        sq_name = squad_info.get("username", "Squad")
+
+        for t in list(_active_threats_cache.values()):
+            if t.get("status") == "inactive" or t.get("engagement_status") == "resolved":
+                continue
+            t_lat = t.get("lat")
+            t_lon = t.get("lon")
+            if t_lat is None or t_lon is None:
+                continue
+
+            radius = float(t.get("radius") or 150.0)
+            dist = haversine_distance_meters(sq_lat, sq_lon, t_lat, t_lon)
+            if dist <= radius:
+                alerts.append({
+                    "id": f"{sq_id}_{t.get('id')}",
+                    "threat_id": str(t.get("id")),
+                    "threat_name": t.get("name"),
+                    "threat_type": t.get("threat_type"),
+                    "severity_level": t.get("severity_level"),
+                    "squad_id": sq_id,
+                    "squad_name": sq_name,
+                    "distance_meters": round(dist, 1),
+                    "danger_radius_meters": radius,
+                    "message": f"CRITICAL: {sq_name} is INSIDE danger perimeter of {t.get('name')} ({round(dist, 1)}m <= {radius}m)!",
+                    "target_sid": squad_sid,
+                })
+
+    elif threat_dict and threat_dict.get("lat") is not None and threat_dict.get("lon") is not None:
+        if threat_dict.get("status") != "inactive" and threat_dict.get("engagement_status") != "resolved":
+            t_lat = threat_dict["lat"]
+            t_lon = threat_dict["lon"]
+            radius = float(threat_dict.get("radius") or 150.0)
+            t_id = str(threat_dict.get("id"))
+            t_name = threat_dict.get("name")
+
+            for c_sid, c_info in list(_connected_clients.items()):
+                if c_info.get("role") in ["Squad", "SapperSquad"]:
+                    sq_lat = c_info.get("lat")
+                    sq_lon = c_info.get("lon")
+                    if sq_lat is not None and sq_lon is not None:
+                        dist = haversine_distance_meters(sq_lat, sq_lon, t_lat, t_lon)
+                        if dist <= radius:
+                            sq_id = str(c_info.get("user_id"))
+                            sq_name = c_info.get("username", "Squad")
+                            alerts.append({
+                                "id": f"{sq_id}_{t_id}",
+                                "threat_id": t_id,
+                                "threat_name": t_name,
+                                "threat_type": threat_dict.get("threat_type"),
+                                "severity_level": threat_dict.get("severity_level"),
+                                "squad_id": sq_id,
+                                "squad_name": sq_name,
+                                "distance_meters": round(dist, 1),
+                                "danger_radius_meters": radius,
+                                "message": f"CRITICAL: {sq_name} is INSIDE danger perimeter of {t_name} ({round(dist, 1)}m <= {radius}m)!",
+                                "target_sid": c_sid,
+                            })
+
+    for alert in alerts:
+        target_sid = alert.get("target_sid")
+        if target_sid:
+            await sio.emit("danger_zone_alert", alert, room=target_sid)
+        for c_sid, c_info in list(_connected_clients.items()):
+            if c_info.get("role") in ["MainCommandCenter", "AreaCommandCenter"]:
+                await sio.emit("danger_zone_alert", alert, room=c_sid)
 
 
 async def broadcast_to_visibility_range(
@@ -231,6 +337,12 @@ async def broadcast_to_visibility_range(
 
 
 async def broadcast_threat_event(event_name: str, threat_dict: dict):
+    t_id = str(threat_dict.get("id"))
+    if threat_dict.get("status") == "inactive":
+        _active_threats_cache.pop(t_id, None)
+    else:
+        _active_threats_cache[t_id] = threat_dict
+
     lat = threat_dict.get("lat")
     lon = threat_dict.get("lon")
     if lat is not None and lon is not None:
@@ -242,8 +354,9 @@ async def broadcast_threat_event(event_name: str, threat_dict: dict):
             event_name=event_name,
             payload=threat_dict,
         )
+        await check_and_broadcast_danger_alerts(threat_dict=threat_dict)
 
 
 async def broadcast_unit_status_changed(unit_id: str, status: str):
-    # Status deactivation is broadcast to all active clients so the marker is immediately removed
     await sio.emit("unit_status_changed", {"id": str(unit_id), "status": status})
+

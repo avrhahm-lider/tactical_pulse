@@ -31,17 +31,18 @@ SQUAD_ROUTES = {
 }
 
 # Aerial flight paths for hostile drones (lat, lon, altitude_m)
+# Configured to create realistic danger zone intrusions over friendly patrol corridors
 DRONE_CONFIGS = [
     {
         "name": "Hostile UAV Alpha",
         "severity": "critical",
         "radius": 200.0,
         "key_points": [
-            (32.1150, 34.8050, 450.0),
-            (32.1350, 34.8250, 490.0),
-            (32.1550, 34.8100, 470.0),
-            (32.1400, 34.7900, 460.0),
-            (32.1200, 34.7950, 450.0),
+            (32.0985, 34.8000, 350.0),  # Directly at Paratroopers northern turn!
+            (32.1150, 34.8150, 420.0),
+            (32.1300, 34.8100, 450.0),
+            (32.1100, 34.7950, 390.0),
+            (32.0960, 34.7950, 360.0),  # Intersects return patrol path!
         ],
     },
     {
@@ -61,10 +62,11 @@ DRONE_CONFIGS = [
         "severity": "critical",
         "radius": 250.0,
         "key_points": [
-            (32.0950, 34.8200, 220.0),
-            (32.1120, 34.8380, 250.0),
-            (32.1280, 34.8220, 230.0),
-            (32.1100, 34.8080, 210.0),
+            (32.0920, 34.7890, 180.0),  # Directly at Golani & Paratroopers patrol intersection!
+            (32.0980, 34.7980, 220.0),  # Sweeps along Paratroopers patrol corridor!
+            (32.1060, 34.8080, 260.0),
+            (32.0940, 34.7904, 210.0),  # Directly sweeps Golani tactical route!
+            (32.0865, 34.7830, 190.0),  # Crosses Golani squad base route!
         ],
     },
 ]
@@ -156,6 +158,10 @@ async def simulate_single_unit(username: str, password: str, steps: int = 0, del
 
     # 2. Connect via Socket.IO
     sio = socketio.AsyncClient(logger=False, engineio_logger=False)
+
+    @sio.on("danger_zone_alert")
+    async def on_danger_alert(data):
+        print(f"\n🚨🚨🚨 [{username.upper()} HAZARD ALERT] {data.get('message')} 🚨🚨🚨\n")
 
     try:
         await sio.connect(

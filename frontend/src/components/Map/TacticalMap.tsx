@@ -30,6 +30,7 @@ export const TacticalMap: React.FC = () => {
   const {
     squads,
     threats,
+    dangerZoneAlerts,
     isPickingLocationOnMap,
     pickedLocation,
     setPickedLocation,
@@ -279,33 +280,52 @@ export const TacticalMap: React.FC = () => {
         threatColor = '#10b981' // Green for resolved
       }
 
-      // Draw danger buffer circle (default 150m)
+      const isUnderIntrusion = dangerZoneAlerts.some((a) => a.threat_id === threat.id)
       const radius = threat.radius || 150
+
+      // Draw danger buffer circle (default 150m)
       L.circle([threat.lat, threat.lon], {
         radius,
-        color: threatColor,
-        fillColor: threatColor,
-        fillOpacity: threat.engagement_status === 'resolved' ? 0.08 : 0.22,
-        weight: 1.5,
-        dashArray: threat.engagement_status === 'in_progress' ? '5, 5' : undefined,
+        color: isUnderIntrusion ? '#ff0033' : threatColor,
+        fillColor: isUnderIntrusion ? '#ff0033' : threatColor,
+        fillOpacity: isUnderIntrusion ? 0.38 : (threat.engagement_status === 'resolved' ? 0.08 : 0.22),
+        weight: isUnderIntrusion ? 3 : 1.5,
+        dashArray: isUnderIntrusion ? '4, 4' : (threat.engagement_status === 'in_progress' ? '5, 5' : undefined),
       }).addTo(threatsLayer)
+
+      // If under active intrusion, draw dashed tactical alert line to the endangered squad
+      if (isUnderIntrusion) {
+        dangerZoneAlerts
+          .filter((a) => a.threat_id === threat.id)
+          .forEach((alert) => {
+            const sq = squads[alert.squad_id]
+            if (sq) {
+              L.polyline([[threat.lat, threat.lon], [sq.lat, sq.lon]], {
+                color: '#ff0033',
+                weight: 2.5,
+                dashArray: '6, 6',
+                opacity: 0.9,
+              }).addTo(threatsLayer)
+            }
+          })
+      }
 
       // Threat marker icon
       const threatIconHtml = `
         <div style="position: relative; transform: translate(-50%, -50%); cursor: pointer; text-align: center;">
           <div style="
-            width: 28px;
-            height: 28px;
-            background: ${threatColor};
+            width: ${isUnderIntrusion ? '34px' : '28px'};
+            height: ${isUnderIntrusion ? '34px' : '28px'};
+            background: ${isUnderIntrusion ? '#dc2626' : threatColor};
             border: 2px solid #ffffff;
             border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 0 12px ${threatColor};
-            animation: ${threat.engagement_status === 'unassigned' ? 'threat-pulse 1.8s infinite' : 'none'};
+            box-shadow: 0 0 ${isUnderIntrusion ? '20px #ef4444' : '12px ' + threatColor};
+            animation: ${isUnderIntrusion ? 'threat-pulse 0.8s infinite' : (threat.engagement_status === 'unassigned' ? 'threat-pulse 1.8s infinite' : 'none')};
           ">
-            <span style="color: black; font-weight: 900; font-size: 13px;">!</span>
+            <span style="color: white; font-weight: 900; font-size: 14px;">!</span>
           </div>
           <div style="
             margin-top: 3px;
@@ -314,10 +334,11 @@ export const TacticalMap: React.FC = () => {
             font-size: 10px;
             padding: 1px 4px;
             border-radius: 3px;
-            border: 1px solid ${threatColor};
+            border: 1px solid ${isUnderIntrusion ? '#ff0033' : threatColor};
             white-space: nowrap;
+            font-weight: ${isUnderIntrusion ? 'bold' : 'normal'};
           ">
-            ${threat.name}
+            ${isUnderIntrusion ? '🚨 ' : ''}${threat.name}
           </div>
         </div>
       `
@@ -335,7 +356,7 @@ export const TacticalMap: React.FC = () => {
 
       marker.addTo(threatsLayer)
     })
-  }, [threats, setSelectedEntity])
+  }, [threats, squads, dangerZoneAlerts, setSelectedEntity])
 
   return (
     <div className="relative w-full h-full">

@@ -101,6 +101,20 @@ export interface UnitStatusChangedPayload {
   status: UserStatus
 }
 
+export interface DangerZoneAlert {
+  id: string
+  threat_id: string
+  threat_name: string
+  threat_type: string
+  severity_level: string
+  squad_id: string
+  squad_name: string
+  distance_meters: number
+  danger_radius_meters: number
+  message: string
+  timestamp?: number
+}
+
 export interface ApiError {
   error: {
     code: string
@@ -109,3 +123,4 @@ export interface ApiError {
     details: Record<string, unknown>
   }
 }
+
