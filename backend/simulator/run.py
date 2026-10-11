@@ -7,34 +7,53 @@ import socketio
 BASE_HTTP_URL = "http://127.0.0.1:8000/api/v1"
 BASE_SOCKET_URL = "http://127.0.0.1:8000"
 
-# Waypoints for patrol routes (lat, lon)
-ROUTES = {
+# Key patrol landmarks (lat, lon) forming closed polygons
+KEY_ROUTES = {
     "squad_golani": [
         (32.0853, 34.7818),
-        (32.0868, 34.7832),
-        (32.0885, 34.7850),
-        (32.0902, 34.7868),
-        (32.0920, 34.7885),
-        (32.0935, 34.7905),
-        (32.0928, 34.7882),
-        (32.0910, 34.7860),
-        (32.0890, 34.7840),
-        (32.0870, 34.7825),
-        (32.0853, 34.7818),
+        (32.0880, 34.7845),
+        (32.0915, 34.7875),
+        (32.0945, 34.7910),
+        (32.0935, 34.7945),
+        (32.0905, 34.7925),
+        (32.0875, 34.7870),
     ],
     "squad_paratroopers": [
         (32.0920, 34.7890),
-        (32.0935, 34.7915),
-        (32.0950, 34.7938),
-        (32.0965, 34.7960),
-        (32.0952, 34.7980),
-        (32.0935, 34.7965),
-        (32.0918, 34.7942),
-        (32.0905, 34.7920),
-        (32.0912, 34.7905),
-        (32.0920, 34.7890),
+        (32.0945, 34.7925),
+        (32.0970, 34.7965),
+        (32.0985, 34.8000),
+        (32.0955, 34.8025),
+        (32.0925, 34.7995),
+        (32.0905, 34.7945),
+        (32.0910, 34.7910),
     ],
 }
+
+
+def interpolate_route(key_points: list, step_meters: float = 25.0) -> list:
+    """
+    Interpolates dense micro-waypoints between key landmarks.
+    Automatically closes the polygon loop back to the first point.
+    """
+    dense_path = []
+    num_pts = len(key_points)
+    for i in range(num_pts):
+        lat1, lon1 = key_points[i]
+        lat2, lon2 = key_points[(i + 1) % num_pts]
+
+        d_lat_m = (lat2 - lat1) * 111320.0
+        d_lon_m = (lon2 - lon1) * 111320.0 * math.cos(math.radians((lat1 + lat2) / 2))
+        segment_dist_m = math.sqrt(d_lat_m**2 + d_lon_m**2)
+
+        sub_steps = max(1, int(segment_dist_m / step_meters))
+        for s in range(sub_steps):
+            t = s / sub_steps
+            lat = lat1 + (lat2 - lat1) * t
+            lon = lon1 + (lon2 - lon1) * t
+            dense_path.append((round(lat, 6), round(lon, 6)))
+
+    return dense_path
 
 
 def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -47,16 +66,18 @@ def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     return round((bearing + 360) % 360, 1)
 
 
-async def simulate_single_unit(username: str, password: str, steps: int = 0, delay: float = 1.5):
+async def simulate_single_unit(username: str, password: str, steps: int = 0, delay: float = 1.0, step_meters: float = 25.0):
     """
-    Simulates movement for a single tactical unit.
+    Simulates movement for a single tactical unit with smooth micro-stepping.
     steps <= 0 means run continuously in infinite patrol loop.
     """
-    waypoints = ROUTES.get(username, ROUTES["squad_golani"])
+    key_points = KEY_ROUTES.get(username, KEY_ROUTES["squad_golani"])
+    waypoints = interpolate_route(key_points, step_meters=step_meters)
     total_waypoints = len(waypoints)
     is_infinite = steps <= 0
 
-    print(f"[SIMULATOR] Starting unit: '{username}' (Mode: {'Continuous Loop' if is_infinite else f'{steps} steps'})")
+    print(f"[{username}] Route generated: {total_waypoints} micro-steps per patrol loop (~{int(step_meters)}m/step)")
+    print(f"[{username}] Starting simulation (Mode: {'Continuous Loop' if is_infinite else f'{steps} steps'})")
 
     # 1. Login via REST
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -92,12 +113,13 @@ async def simulate_single_unit(username: str, password: str, steps: int = 0, del
             BASE_SOCKET_URL,
             socketio_path="/socket.io",
             auth={"token": f"Bearer {token}"},
+            transports=["websocket"],
         )
     except Exception as e:
         print(f"[{username}] Socket connection error: {e}")
         return
 
-    # 3. Movement Loop
+    # 3. Micro-Stepping Movement Loop
     step = 0
     try:
         while is_infinite or step < steps:
@@ -116,12 +138,14 @@ async def simulate_single_unit(username: str, password: str, steps: int = 0, del
 
             step += 1
             step_label = f"#{step}" if is_infinite else f"{step}/{steps}"
-            print(f"[{username}] Step {step_label} -> Lat: {curr_lat:.4f}, Lon: {curr_lon:.4f}, Heading: {heading}°")
+            lap = (step // total_waypoints) + 1
+            progress_in_lap = (step % total_waypoints)
+            print(f"[{username}] Step {step_label} (Lap {lap}, point {progress_in_lap}/{total_waypoints}) -> Lat: {curr_lat:.5f}, Lon: {curr_lon:.5f}, Heading: {heading:5.1f}°")
 
             await sio.emit("location_update", payload)
 
-            # Periodic heartbeat ping every 10 steps
-            if step % 10 == 0:
+            # Periodic keep-alive ping every 15 steps
+            if step % 15 == 0:
                 await sio.emit("heartbeat", {})
 
             await asyncio.sleep(delay)
@@ -130,24 +154,23 @@ async def simulate_single_unit(username: str, password: str, steps: int = 0, del
         pass
     finally:
         await sio.disconnect()
-        print(f"[{username}] Patrol finished after {step} steps.")
+        print(f"[{username}] Patrol ended gracefully after {step} micro-steps.")
 
 
 async def main():
-    # Parsing command-line arguments
-    # Usage: python simulator/run.py [unit|all] [steps|--loop] [--delay X]
+    # Command-line interface:
+    # python simulator/run.py [unit|all] [steps|--loop] [--delay X] [--step-meters Y]
     args = sys.argv[1:]
 
     target_unit = "all"
     steps = 0  # 0 means infinite loop
-    delay = 1.5
+    delay = 1.0  # 1.0s per step
+    step_meters = 25.0  # 25 meters per micro-step
 
-    # Check first argument: unit name or "all"
     if args and not args[0].startswith("-"):
         target_unit = args[0]
         args = args[1:]
 
-    # Check second argument: step count or "--loop"
     if args and not args[0].startswith("-"):
         val = args[0].lower()
         if val in ("--loop", "loop", "inf", "infinite"):
@@ -159,20 +182,25 @@ async def main():
                 steps = 0
         args = args[1:]
 
-    # Check optional --delay
     for i, a in enumerate(args):
         if a in ("--delay", "-d") and i + 1 < len(args):
             try:
                 delay = float(args[i + 1])
             except ValueError:
                 pass
+        elif a in ("--step-meters", "-s", "--step") and i + 1 < len(args):
+            try:
+                step_meters = float(args[i + 1])
+            except ValueError:
+                pass
         elif a in ("--loop", "-l"):
             steps = 0
 
-    print("=" * 60)
-    print("  TACTICAL PULSE MOVEMENT SIMULATOR")
-    print(f"  Target: {target_unit.upper()} | Steps: {'CONTINUOUS (Ctrl+C to stop)' if steps <= 0 else steps} | Delay: {delay}s")
-    print("=" * 60)
+    print("=" * 68)
+    print("  TACTICAL PULSE MICRO-STEPPING PATROL SIMULATOR")
+    print(f"  Target: {target_unit.upper()} | Mode: {'CONTINUOUS LOOP (Ctrl+C to stop)' if steps <= 0 else f'{steps} steps'}")
+    print(f"  Step Size: ~{int(step_meters)} meters | Speed: 1 step / {delay}s (~{int(step_meters / delay * 3.6)} km/h)")
+    print("=" * 68)
 
     units_to_run = []
     if target_unit == "all":
@@ -180,16 +208,19 @@ async def main():
             ("squad_golani", "squad123"),
             ("squad_paratroopers", "squad123"),
         ]
-    elif target_unit in ROUTES:
+    elif target_unit in KEY_ROUTES:
         units_to_run = [(target_unit, "squad123")]
     else:
-        # Custom unit name, default password
         units_to_run = [(target_unit, "squad123")]
 
     tasks = []
     for u, p in units_to_run:
-        tasks.append(asyncio.create_task(simulate_single_unit(u, p, steps=steps, delay=delay)))
-        await asyncio.sleep(2.0)
+        tasks.append(
+            asyncio.create_task(
+                simulate_single_unit(u, p, steps=steps, delay=delay, step_meters=step_meters)
+            )
+        )
+        await asyncio.sleep(1.0)
 
     try:
         await asyncio.gather(*tasks)
