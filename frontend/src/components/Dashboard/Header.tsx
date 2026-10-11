@@ -7,6 +7,7 @@ import {
   LogOut,
   PlusCircle,
   Compass,
+  UserPlus,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useMapStore } from '../../store/useMapStore'
@@ -23,7 +24,13 @@ export const Header: React.FC<HeaderProps> = ({
   isUnitDrawerOpen,
 }) => {
   const { user, logout } = useAuthStore()
-  const { squads, threats, selectedZoneFilter, setSelectedZoneFilter } = useMapStore()
+  const {
+    squads,
+    threats,
+    selectedZoneFilter,
+    setSelectedZoneFilter,
+    setIsUserRegistrationModalOpen,
+  } = useMapStore()
 
   const activeThreatCount = Object.values(threats).filter(
     (t) => t.status === 'active' && t.engagement_status !== 'resolved'
@@ -121,13 +128,22 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right: Actions & User Info */}
       <div className="flex items-center space-x-4">
-        {/* Create Threat Button */}
+        {/* Open Alert Button */}
         <button
           onClick={onOpenCreateThreat}
           className="px-3.5 py-2 rounded-lg bg-red-600/90 hover:bg-red-500 text-white font-mono text-xs font-semibold tracking-wider flex items-center space-x-2 shadow-lg shadow-red-950/40 border border-red-500/50 transition-all cursor-pointer"
         >
           <PlusCircle className="w-4 h-4" />
-          <span>REPORT THREAT</span>
+          <span>OPEN ALERT</span>
+        </button>
+
+        {/* Register Force Button */}
+        <button
+          onClick={() => setIsUserRegistrationModalOpen(true)}
+          className="px-3 py-2 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-cyan-300 font-mono text-xs font-semibold tracking-wider flex items-center space-x-2 border border-cyan-500/50 hover:border-cyan-400 transition-all cursor-pointer"
+        >
+          <UserPlus className="w-4 h-4 text-cyan-400" />
+          <span className="hidden md:inline">REGISTER FORCE</span>
         </button>
 
         {/* Toggle Unit Drawer */}

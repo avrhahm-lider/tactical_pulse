@@ -5,6 +5,7 @@ import {
   MapPin,
   Clock,
   UserX,
+  UserPlus,
 } from 'lucide-react'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -23,7 +24,7 @@ function isStale(updatedAt?: string): boolean {
 }
 
 export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({ isOpen, onClose }) => {
-  const { squads, removeSquad } = useMapStore()
+  const { squads, removeSquad, setIsUserRegistrationModalOpen } = useMapStore()
   const { user } = useAuthStore()
   const [selectedSquad, setSelectedSquad] = useState<Squad | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -55,15 +56,25 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({ isOpen, onClose 
         <div className="flex items-center space-x-2.5">
           <Users className="w-5 h-5 text-cyan-400" />
           <h2 className="font-mono text-sm font-bold text-white tracking-wider">
-            TACTICAL UNIT ROSTER ({squadList.length})
+            TACTICAL ROSTER ({squadList.length})
           </h2>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setIsUserRegistrationModalOpen(true)}
+            title="Register new force or headquarters"
+            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 font-mono text-[10px] flex items-center gap-1 cursor-pointer"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>+ FORCE</span>
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* List */}

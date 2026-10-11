@@ -6,6 +6,7 @@ import { LoginForm } from './components/Auth/LoginForm'
 import { Header } from './components/Dashboard/Header'
 import { TacticalMap } from './components/Map/TacticalMap'
 import { ThreatModal } from './components/Forms/ThreatModal'
+import { UserRegistrationModal } from './components/Forms/UserRegistrationModal'
 import { ThreatDetailModal } from './components/Dashboard/ThreatDetailModal'
 import { UnitListDrawer } from './components/Dashboard/UnitListDrawer'
 import { ProximityAlertBanner } from './components/Dashboard/ProximityAlertBanner'
@@ -20,6 +21,8 @@ export const App: React.FC = () => {
     loadSnapshot,
     isThreatModalOpen,
     setIsThreatModalOpen,
+    isUserRegistrationModalOpen,
+    setIsUserRegistrationModalOpen,
   } = useMapStore()
 
   const [isUnitDrawerOpen, setIsUnitDrawerOpen] = useState(false)
@@ -91,6 +94,12 @@ export const App: React.FC = () => {
         <ThreatModal
           isOpen={isThreatModalOpen}
           onClose={() => setIsThreatModalOpen(false)}
+        />
+
+        {/* Force & Regional HQ Registration Modal */}
+        <UserRegistrationModal
+          isOpen={isUserRegistrationModalOpen}
+          onClose={() => setIsUserRegistrationModalOpen(false)}
         />
 
         {/* Threat Action / Details Modal */}

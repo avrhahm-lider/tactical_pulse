@@ -204,3 +204,106 @@ body {
   border-radius: 4px !important;
   box-shadow: 0 0 12px rgba(168, 85, 247, 0.4) !important;
 }
+
+/* Tactical Force Prop Popup (Moves with marker, toggles on click) */
+.tactical-force-popup .leaflet-popup-content-wrapper {
+  background: rgba(10, 15, 29, 0.95) !important;
+  backdrop-filter: blur(8px) !important;
+  border: 1px solid #00e5ff !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8), 0 0 14px rgba(0, 229, 255, 0.3) !important;
+  border-radius: 8px !important;
+  color: #ffffff !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.tactical-force-popup .leaflet-popup-content {
+  margin: 0 !important;
+  line-height: 1.4 !important;
+}
+
+.tactical-force-popup .leaflet-popup-tip {
+  background: rgba(10, 15, 29, 0.95) !important;
+  border: 1px solid #00e5ff !important;
+}
+
+.tactical-prop-popup {
+  padding: 8px 12px;
+  min-width: 190px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.prop-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 5px;
+  margin-bottom: 6px;
+}
+
+.prop-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.prop-title {
+  font-weight: 700;
+  font-size: 11px;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.prop-badge {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.prop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+}
+
+.prop-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.prop-label {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.prop-val {
+  color: #f1f5f9;
+  font-weight: 500;
+  font-size: 10px;
+}
+
+.prop-footer {
+  margin-top: 6px;
+  font-size: 8px;
+  color: #64748b;
+  text-align: center;
+  letter-spacing: 0.5px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  padding-top: 4px;
+}
+

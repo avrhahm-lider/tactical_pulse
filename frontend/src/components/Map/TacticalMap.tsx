@@ -1,9 +1,9 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useMemo, useCallback } from 'react'
 import L from 'leaflet'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
-import type { Squad, Threat } from '../../types'
-import { Compass, Crosshair } from 'lucide-react'
+import type { Squad, Threat, User } from '../../types'
+import { Compass, Crosshair, Maximize2 } from 'lucide-react'
 
 // Leaflet default icon fix
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl
@@ -77,6 +77,122 @@ const SECTOR_DEFS: Record<'North' | 'Center' | 'South', SectorConfig> = {
   },
 }
 
+// Build tactical pop-up ("prop") HTML containing basic force details
+function buildForcePopupHtml(squad: Squad, isStaleSignal: boolean): string {
+  const isHQ = squad.role === 'AreaCommandCenter'
+  const isRadar = squad.role === 'Radar'
+  const isSapper = squad.role === 'SapperSquad'
+  const isManager = squad.role === 'MainCommandCenter'
+
+  const roleName = isHQ
+    ? 'REGIONAL HQ'
+    : isSapper
+    ? 'SAPPER SQUAD'
+    : isRadar
+    ? 'RADAR SENSOR'
+    : isManager
+    ? 'SUPREME HQ'
+    : 'TACTICAL SQUAD'
+
+  const roleColor = isHQ
+    ? '#c084fc'
+    : isSapper
+    ? '#f59e0b'
+    : isRadar
+    ? '#00e5ff'
+    : isManager
+    ? '#a855f7'
+    : '#10b981'
+
+  const soldiersCount = squad.soldiers ? squad.soldiers.length : 0
+
+  return `
+    <div class="tactical-prop-popup">
+      <div class="prop-header">
+        <span class="prop-dot" style="background: ${roleColor}; box-shadow: 0 0 8px ${roleColor};"></span>
+        <span class="prop-title">${squad.name}</span>
+        <span class="prop-badge" style="color: ${roleColor}; border-color: ${roleColor}60; background: ${roleColor}20;">${roleName}</span>
+      </div>
+      <div class="prop-body">
+        <div class="prop-row">
+          <span class="prop-label">SECTOR:</span>
+          <span class="prop-val">${squad.area.toUpperCase()}</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">POSITION:</span>
+          <span class="prop-val font-mono">${squad.lat.toFixed(4)}°, ${squad.lon.toFixed(4)}°</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">HEADING:</span>
+          <span class="prop-val font-mono">${squad.heading || 0}°</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">TELEMETRY:</span>
+          <span class="prop-val" style="color: ${isStaleSignal ? '#f59e0b' : '#10b981'}; font-weight: bold;">
+            ${isStaleSignal ? 'STALE (>60s)' : 'ONLINE'}
+          </span>
+        </div>
+        ${
+          soldiersCount > 0
+            ? `
+        <div class="prop-row">
+          <span class="prop-label">PERSONNEL:</span>
+          <span class="prop-val">${soldiersCount} Operatives</span>
+        </div>`
+            : ''
+        }
+      </div>
+      <div class="prop-footer">CLICK OBJECT AGAIN TO CLOSE</div>
+    </div>
+  `
+}
+
+// Extract coordinates of all active objects relevant to user's assigned sector or view filter
+function getRelevantCoordinates(
+  user: User | null,
+  zoneFilter: 'Global' | 'North' | 'Center' | 'South',
+  squads: Record<string, Squad>,
+  threats: Record<string, Threat>
+): [number, number][] {
+  let targetSector: 'Global' | 'North' | 'Center' | 'South' = 'Global'
+  if (user?.role === 'AreaCommandCenter') {
+    targetSector = (user.area as 'North' | 'Center' | 'South') || 'North'
+  } else if (user?.role === 'MainCommandCenter') {
+    targetSector = zoneFilter
+  } else if (user?.area && user.area !== 'Global') {
+    targetSector = user.area as 'North' | 'Center' | 'South'
+  }
+
+  const isSectorMatch = (lat: number, area?: string) => {
+    if (targetSector === 'Global') return true
+    if (area && area === targetSector) return true
+    if (targetSector === 'North') return lat >= 32.7
+    if (targetSector === 'Center') return lat >= 31.9 && lat < 32.7
+    if (targetSector === 'South') return lat < 31.9
+    return false
+  }
+
+  const points: [number, number][] = []
+
+  // Add squads in sector
+  Object.values(squads).forEach((sq) => {
+    if (sq.status === 'inactive') return
+    if (isSectorMatch(sq.lat, sq.area)) {
+      points.push([sq.lat, sq.lon])
+    }
+  })
+
+  // Add active threats in sector
+  Object.values(threats).forEach((th) => {
+    if (th.status === 'inactive') return
+    if (isSectorMatch(th.lat)) {
+      points.push([th.lat, th.lon])
+    }
+  })
+
+  return points
+}
+
 export const TacticalMap: React.FC = () => {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapInstanceRef = useRef<L.Map | null>(null)
@@ -84,6 +200,7 @@ export const TacticalMap: React.FC = () => {
   const threatsLayerRef = useRef<L.LayerGroup | null>(null)
   const zonesLayerRef = useRef<L.LayerGroup | null>(null)
   const pinMarkerRef = useRef<L.Marker | null>(null)
+  const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
 
   const {
     squads,
@@ -157,17 +274,22 @@ export const TacticalMap: React.FC = () => {
     return () => {
       map.remove()
       mapInstanceRef.current = null
+      squadMarkersRef.current.clear()
     }
   }, [])
 
-  // Handle Map Click: opens Threat/Alert modal at clicked coordinates
+  // Handle Map Click: A threat is NOT added simply by clicking the map;
+  // instead, one must first select "Open Alert" and choose the "Select from Map" option.
+  // Clicking anywhere registers the coordinates directly without requiring an additional button press.
   useEffect(() => {
     const map = mapInstanceRef.current
     if (!map) return
 
     const handleMapClick = (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng
-      openAlertAtLocation(lat, lng)
+      if (useMapStore.getState().isPickingLocationOnMap) {
+        const { lat, lng } = e.latlng
+        openAlertAtLocation(lat, lng)
+      }
     }
 
     map.on('click', handleMapClick)
@@ -176,49 +298,68 @@ export const TacticalMap: React.FC = () => {
     }
   }, [openAlertAtLocation])
 
-  // Initial Camera focus based on User Role & Authorized Sector
-  useEffect(() => {
+  // Auto-adjust view to encompass the range between relevant objects in active sector (empty areas ignored)
+  const autoAdjustView = useCallback((animate = true) => {
     const map = mapInstanceRef.current
-    if (!map || !user) return
+    if (!map) return
 
-    // If Regional Command Center, immediately focus on their authorized sector
-    if (user.role === 'AreaCommandCenter') {
-      const targetArea = user.area as 'North' | 'Center' | 'South'
-      if (SECTOR_DEFS[targetArea]) {
-        map.fitBounds(SECTOR_DEFS[targetArea].bounds, { padding: [40, 40], maxZoom: 10 })
+    const points = getRelevantCoordinates(user, selectedZoneFilter, squads, threats)
+
+    if (points.length >= 2) {
+      // Bounding box automatically spans from the first incident/unit to the last, ignoring empty zones
+      const bounds = L.latLngBounds(points)
+      if (animate) {
+        map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 15, duration: 1.0 })
+      } else {
+        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 })
       }
-    } else if (user.role === 'MainCommandCenter') {
-      // Supreme Command sees all Israel theater
-      map.fitBounds(
-        [
-          [29.5, 34.2],
-          [33.4, 35.8],
-        ],
-        { padding: [30, 30] }
-      )
-    }
-  }, [user])
-
-  // Handle Manager Sector Switcher camera fly-to
-  useEffect(() => {
-    const map = mapInstanceRef.current
-    if (!map || user?.role !== 'MainCommandCenter') return
-
-    if (selectedZoneFilter === 'Global') {
-      map.flyToBounds(
-        [
-          [29.5, 34.2],
-          [33.4, 35.8],
-        ],
-        { padding: [30, 30], duration: 1.2 }
-      )
+    } else if (points.length === 1) {
+      if (animate) {
+        map.flyTo(points[0], 13, { duration: 1.0 })
+      } else {
+        map.setView(points[0], 13)
+      }
     } else {
-      const secDef = SECTOR_DEFS[selectedZoneFilter as 'North' | 'Center' | 'South']
-      if (secDef) {
-        map.flyToBounds(secDef.bounds, { padding: [40, 40], maxZoom: 10, duration: 1.2 })
+      // Sector fallback if zero units or alerts currently exist
+      const targetSector =
+        user?.role === 'AreaCommandCenter'
+          ? (user.area as 'North' | 'Center' | 'South')
+          : user?.role === 'MainCommandCenter'
+          ? selectedZoneFilter
+          : (user?.area as 'North' | 'Center' | 'South')
+
+      if (targetSector && targetSector !== 'Global' && SECTOR_DEFS[targetSector]) {
+        if (animate) {
+          map.flyToBounds(SECTOR_DEFS[targetSector].bounds, { padding: [40, 40], maxZoom: 10, duration: 1.0 })
+        } else {
+          map.fitBounds(SECTOR_DEFS[targetSector].bounds, { padding: [40, 40], maxZoom: 10 })
+        }
+      } else {
+        if (animate) {
+          map.flyToBounds([[29.5, 34.2], [33.4, 35.8]], { padding: [30, 30], duration: 1.0 })
+        } else {
+          map.fitBounds([[29.5, 34.2], [33.4, 35.8]], { padding: [30, 30] })
+        }
       }
     }
-  }, [selectedZoneFilter, user])
+  }, [user, selectedZoneFilter, squads, threats])
+
+  // Automatically adjust view signature: runs when sector changes or relevant objects are updated
+  const relevantSignature = useMemo(() => {
+    const points = getRelevantCoordinates(user, selectedZoneFilter, squads, threats)
+    return `${user?.role}_${selectedZoneFilter}_${points.length}_${points
+      .map((p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`)
+      .join(';')}`
+  }, [user, selectedZoneFilter, squads, threats])
+
+  const prevSignatureRef = useRef<string>('')
+
+  useEffect(() => {
+    if (relevantSignature !== prevSignatureRef.current) {
+      prevSignatureRef.current = relevantSignature
+      autoAdjustView(true)
+    }
+  }, [relevantSignature, autoAdjustView])
 
   // Render Operational Zones & Authorized Sector Visualizations
   useEffect(() => {
@@ -408,11 +549,21 @@ export const TacticalMap: React.FC = () => {
   }, [pickedLocation])
 
   // Render Squads, Radars & Regional Command Headquarters
+  // Basic details about the force are displayed in a prop popup that moves with the object.
+  // Clicking the object toggles the popup open/closed.
   useEffect(() => {
     const markersLayer = markersLayerRef.current
     if (!markersLayer) return
 
-    markersLayer.clearLayers()
+    const currentSquadIds = new Set(Object.keys(squads))
+
+    // Remove any markers whose squad was removed
+    for (const [id, marker] of squadMarkersRef.current.entries()) {
+      if (!currentSquadIds.has(id)) {
+        marker.remove()
+        squadMarkersRef.current.delete(id)
+      }
+    }
 
     Object.values(squads).forEach((squad: Squad) => {
       const isHQ = squad.role === 'AreaCommandCenter'
@@ -442,11 +593,8 @@ export const TacticalMap: React.FC = () => {
       }
 
       // Icon HTML
-      let iconHtml: string
-
-      if (isHQ) {
-        // High-command Headquarters Marker
-        iconHtml = `
+      const iconHtml = isHQ
+        ? `
           <div style="position: relative; transform: translate(-50%, -50%); cursor: pointer; text-align: center;">
             <div style="
               width: 38px;
@@ -481,9 +629,7 @@ export const TacticalMap: React.FC = () => {
             </div>
           </div>
         `
-      } else {
-        // Regular tactical unit marker
-        iconHtml = `
+        : `
           <div style="position: relative; transform: translate(-50%, -50%); cursor: pointer; text-align: center;">
             <div style="
               width: 32px;
@@ -517,7 +663,6 @@ export const TacticalMap: React.FC = () => {
             </div>
           </div>
         `
-      }
 
       const customIcon = L.divIcon({
         className: 'squad-marker-container',
@@ -525,13 +670,39 @@ export const TacticalMap: React.FC = () => {
         iconSize: [0, 0],
       })
 
-      const marker = L.marker([squad.lat, squad.lon], { icon: customIcon })
-      marker.on('click', (e) => {
-        L.DomEvent.stopPropagation(e)
-        setSelectedEntity({ type: 'squad', id: squad.id })
-      })
+      const popupHtml = buildForcePopupHtml(squad, stale && !isHQ)
 
-      marker.addTo(markersLayer)
+      let marker = squadMarkersRef.current.get(squad.id)
+
+      if (marker) {
+        // Smoothly updates marker location (Leaflet natively shifts the open popup with the marker)
+        marker.setLatLng([squad.lat, squad.lon])
+        marker.setIcon(customIcon)
+        marker.setPopupContent(popupHtml)
+      } else {
+        marker = L.marker([squad.lat, squad.lon], { icon: customIcon })
+        marker.bindPopup(popupHtml, {
+          className: 'tactical-force-popup',
+          closeButton: false,
+          autoClose: false,
+          closeOnClick: false,
+          offset: [0, isHQ ? -28 : -22],
+        })
+
+        // Clicking the object opens pop-up; clicking it again closes it
+        marker.on('click', (e) => {
+          L.DomEvent.stopPropagation(e)
+          if (marker!.isPopupOpen()) {
+            marker!.closePopup()
+          } else {
+            marker!.openPopup()
+          }
+          setSelectedEntity({ type: 'squad', id: squad.id })
+        })
+
+        marker.addTo(markersLayer)
+        squadMarkersRef.current.set(squad.id, marker)
+      }
     })
   }, [squads, user, setSelectedEntity])
 
@@ -636,6 +807,18 @@ export const TacticalMap: React.FC = () => {
       {/* Map Target Container */}
       <div ref={mapContainerRef} className="w-full h-full" />
 
+      {/* Auto-Fit Range HUD Button (Spans from first to last incident/force, ignoring empty area) */}
+      <div className="absolute top-4 left-4 z-[999] hud-panel px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-2 font-mono text-xs">
+        <button
+          onClick={() => autoAdjustView(true)}
+          title="Auto-adjust zoom to span between all relevant objects in active sector (empty areas ignored)"
+          className="flex items-center space-x-1.5 px-2 py-1 rounded bg-slate-900/80 hover:bg-cyan-950 border border-slate-700 hover:border-cyan-500 text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer text-[11px] font-bold"
+        >
+          <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
+          <span>AUTO-FIT VIEW</span>
+        </button>
+      </div>
+
       {/* Floating Manager Sector Switcher on Map */}
       {user?.role === 'MainCommandCenter' && (
         <div className="absolute top-4 right-4 z-[999] hud-panel px-3 py-2 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-1 font-mono text-xs">
@@ -676,16 +859,7 @@ export const TacticalMap: React.FC = () => {
             AUTHORIZED SECTOR: {user.area.toUpperCase()}
           </span>
           <button
-            onClick={() => {
-              const target = user.area as 'North' | 'Center' | 'South'
-              if (mapInstanceRef.current && SECTOR_DEFS[target]) {
-                mapInstanceRef.current.flyToBounds(SECTOR_DEFS[target].bounds, {
-                  padding: [40, 40],
-                  maxZoom: 10,
-                  duration: 1.0,
-                })
-              }
-            }}
+            onClick={() => autoAdjustView(true)}
             className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/80 hover:bg-purple-900 border border-purple-600 text-purple-200 ml-1 cursor-pointer"
           >
             FOCUS
