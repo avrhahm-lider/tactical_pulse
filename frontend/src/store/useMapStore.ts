@@ -100,7 +100,6 @@ export const useMapStore = create<MapState>((set, get) => ({
       }
 
       let updatedDangerAlerts = [...state.dangerZoneAlerts]
-      let updatedProximityAlerts = [...state.proximityAlerts]
       let updatedDismissedIds = [...state.dismissedDangerAlertIds]
 
       // Only check danger & proximity alerts for the CURRENT squad unit
@@ -143,21 +142,13 @@ export const useMapStore = create<MapState>((set, get) => ({
             updatedDangerAlerts = updatedDangerAlerts.filter((a) => a.id !== alertKey)
             updatedDismissedIds = updatedDismissedIds.filter((k) => k !== alertKey)
           }
-
-          if (dist <= 2000) {
-            if (!updatedProximityAlerts.some((t) => t.id === threat.id)) {
-              updatedProximityAlerts.push(threat)
-            }
-          } else {
-            updatedProximityAlerts = updatedProximityAlerts.filter((t) => t.id !== threat.id)
-          }
         })
       }
 
       return {
         squads: updatedSquads,
         dangerZoneAlerts: updatedDangerAlerts,
-        proximityAlerts: updatedProximityAlerts,
+        proximityAlerts: [],
         dismissedDangerAlertIds: updatedDismissedIds,
       }
     })
@@ -191,7 +182,6 @@ export const useMapStore = create<MapState>((set, get) => ({
 
       const updatedThreats = { ...state.threats, [threat.id]: threat }
       let updatedDangerAlerts = [...state.dangerZoneAlerts]
-      let updatedProximityAlerts = [...state.proximityAlerts]
       let updatedDismissedIds = [...state.dismissedDangerAlertIds]
 
       // Only check danger & proximity alerts for the CURRENT squad unit
@@ -228,20 +218,12 @@ export const useMapStore = create<MapState>((set, get) => ({
           updatedDangerAlerts = updatedDangerAlerts.filter((a) => a.id !== alertKey)
           updatedDismissedIds = updatedDismissedIds.filter((k) => k !== alertKey)
         }
-
-        if (dist <= 2000 && threat.engagement_status !== 'resolved') {
-          if (!updatedProximityAlerts.some((t) => t.id === threat.id)) {
-            updatedProximityAlerts.push(threat)
-          }
-        } else {
-          updatedProximityAlerts = updatedProximityAlerts.filter((t) => t.id !== threat.id)
-        }
       }
 
       return {
         threats: updatedThreats,
         dangerZoneAlerts: updatedDangerAlerts,
-        proximityAlerts: updatedProximityAlerts,
+        proximityAlerts: [],
         dismissedDangerAlertIds: updatedDismissedIds,
       }
     })

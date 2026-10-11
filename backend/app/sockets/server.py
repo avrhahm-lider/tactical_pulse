@@ -373,8 +373,17 @@ async def broadcast_to_visibility_range(
 
 async def broadcast_threat_event(event_name: str, threat_dict: dict):
     t_id = str(threat_dict.get("id"))
-    if threat_dict.get("status") == "inactive":
+    is_neutralized = threat_dict.get("status") == "inactive" or threat_dict.get("engagement_status") == "resolved"
+    if is_neutralized:
         _active_threats_cache.pop(t_id, None)
+        # Clear all active danger breaches for this neutralized threat and notify affected squads
+        for k in list(_active_danger_breaches):
+            if k.endswith(f"_{t_id}"):
+                _active_danger_breaches.discard(k)
+                sq_id = k.split("_")[0]
+                for c_sid, c_info in list(_connected_clients.items()):
+                    if str(c_info.get("user_id")) == sq_id:
+                        await sio.emit("danger_zone_cleared", {"id": k, "squad_id": sq_id, "threat_id": t_id}, room=c_sid)
     else:
         _active_threats_cache[t_id] = threat_dict
 

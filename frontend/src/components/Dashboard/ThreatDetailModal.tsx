@@ -8,6 +8,7 @@ import {
   UserCheck,
   Compass,
   MapPin,
+  Radar,
 } from 'lucide-react'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -233,52 +234,83 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
 
         {/* Tactical Actions (RBAC Enforced) */}
         <div className="mt-6 pt-4 border-t border-slate-800 flex flex-wrap gap-2 justify-end">
-          {/* Take Responsibility */}
-          {threat.engagement_status === 'unassigned' && (
-            <button
-              onClick={handleTakeResponsibility}
-              disabled={isLoading || !canEngageThisThreat}
-              className={`px-4 py-2 rounded font-mono text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer ${
-                canEngageThisThreat
-                  ? 'bg-amber-600 hover:bg-amber-500 text-black shadow-lg shadow-amber-900/40'
-                  : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
-              }`}
-              title={
-                !canEngageThisThreat
-                  ? 'RBAC: Only SapperSquad can engage explosive threats'
-                  : ''
-              }
-            >
-              <Shield className="w-3.5 h-3.5" />
-              <span>
-                {threat.threat_type === 'explosive' && !canEngageExplosive
-                  ? 'SAPPER SQUAD ONLY'
-                  : 'TAKE RESPONSIBILITY'}
-              </span>
-            </button>
-          )}
+          {/* DRONE THREATS: ONLY RADAR CAN REPORT DRONE DESTROYED / ARCHIVE */}
+          {threat.threat_type === 'drone' ? (
+            isRadar ? (
+              <>
+                {threat.engagement_status !== 'resolved' && (
+                  <button
+                    onClick={handleResolve}
+                    disabled={isLoading}
+                    className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>CONFIRM DRONE DESTROYED</span>
+                  </button>
+                )}
+                <button
+                  onClick={handleArchive}
+                  disabled={isLoading}
+                  className="px-3.5 py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs flex items-center space-x-1.5 border border-slate-700 transition-colors cursor-pointer"
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  <span>DEACTIVATE DRONE TRACK</span>
+                </button>
+              </>
+            ) : (
+              <div className="px-3 py-2 rounded bg-slate-900/90 border border-slate-700 text-cyan-400 font-mono text-xs flex items-center space-x-2">
+                <Radar className="w-4 h-4 text-cyan-400" />
+                <span>ONLY RADAR CAN REPORT DRONE DESTROYED</span>
+              </div>
+            )
+          ) : (
+            <>
+              {/* NON-DRONE THREATS: Standard ground squad / sapper workflow */}
+              {threat.engagement_status === 'unassigned' && (
+                <button
+                  onClick={handleTakeResponsibility}
+                  disabled={isLoading || !canEngageThisThreat}
+                  className={`px-4 py-2 rounded font-mono text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer ${
+                    canEngageThisThreat
+                      ? 'bg-amber-600 hover:bg-amber-500 text-black shadow-lg shadow-amber-900/40'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                  }`}
+                  title={
+                    !canEngageThisThreat
+                      ? 'RBAC: Only SapperSquad can engage explosive threats'
+                      : ''
+                  }
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>
+                    {threat.threat_type === 'explosive' && !canEngageExplosive
+                      ? 'SAPPER SQUAD ONLY'
+                      : 'TAKE RESPONSIBILITY'}
+                  </span>
+                </button>
+              )}
 
-          {/* Resolve Threat */}
-          {threat.engagement_status === 'in_progress' && (
-            <button
-              onClick={handleResolve}
-              disabled={isLoading}
-              className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
-            >
-              <CheckCircle className="w-3.5 h-3.5" />
-              <span>MARK RESOLVED / NEUTRALIZED</span>
-            </button>
-          )}
+              {threat.engagement_status === 'in_progress' && (
+                <button
+                  onClick={handleResolve}
+                  disabled={isLoading}
+                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>MARK RESOLVED / NEUTRALIZED</span>
+                </button>
+              )}
 
-          {/* Archive / Deactivate Threat */}
-          <button
-            onClick={handleArchive}
-            disabled={isLoading}
-            className="px-3.5 py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs flex items-center space-x-1.5 border border-slate-700 transition-colors cursor-pointer"
-          >
-            <Archive className="w-3.5 h-3.5" />
-            <span>ARCHIVE (DEACTIVATE)</span>
-          </button>
+              <button
+                onClick={handleArchive}
+                disabled={isLoading}
+                className="px-3.5 py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs flex items-center space-x-1.5 border border-slate-700 transition-colors cursor-pointer"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>ARCHIVE (DEACTIVATE)</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

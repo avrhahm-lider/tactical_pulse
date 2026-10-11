@@ -251,21 +251,33 @@ async def update_threat(
         threat.engagement_status = "in_progress"
 
     elif req.engagement_status == "resolved":
+        # Drone threats: ONLY Radar can confirm drone is destroyed!
+        if threat.threat_type == "drone":
+            if current_user.role != "Radar":
+                raise AppException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="FORBIDDEN",
+                    message="Only Radar units can report and confirm that an enemy drone has been destroyed",
+                )
+            threat.engagement_status = "resolved"
         # Explosive IEDs can only be resolved by SapperSquad or Command Center
-        if threat.threat_type == "explosive" and current_user.role not in ["SapperSquad", "MainCommandCenter", "AreaCommandCenter"]:
-            raise AppException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="FORBIDDEN",
-                message="Only SapperSquad or Command Center can resolve explosive hazards",
-            )
+        elif threat.threat_type == "explosive":
+            if current_user.role not in ["SapperSquad", "MainCommandCenter", "AreaCommandCenter"]:
+                raise AppException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="FORBIDDEN",
+                    message="Only SapperSquad or Command Center can resolve explosive hazards",
+                )
+            threat.engagement_status = "resolved"
         # Regular movable threats: assigned squad or command center
-        if is_field_unit and threat.assigned_to_id != current_user.id and current_user.role not in ["MainCommandCenter", "AreaCommandCenter"]:
-            raise AppException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="FORBIDDEN",
-                message="Only the assigned squad or Command Center can resolve this threat",
-            )
-        threat.engagement_status = "resolved"
+        else:
+            if is_field_unit and threat.assigned_to_id != current_user.id and current_user.role not in ["MainCommandCenter", "AreaCommandCenter"]:
+                raise AppException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="FORBIDDEN",
+                    message="Only the assigned squad or Command Center can resolve this threat",
+                )
+            threat.engagement_status = "resolved"
 
     elif req.engagement_status == "unassigned":
         threat.engagement_status = "unassigned"
@@ -302,19 +314,28 @@ async def update_threat(
 
     # 5. Lifecycle Deactivation
     if req.status == "inactive":
-        if threat.engagement_status == "in_progress":
+        if threat.threat_type == "drone":
+            if current_user.role != "Radar":
+                raise AppException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="FORBIDDEN",
+                    message="Only Radar units can report that a drone has been destroyed and deactivate its track",
+                )
+            threat.status = "inactive"
+        elif threat.engagement_status == "in_progress":
             raise AppException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 code="INVALID_REQUEST",
                 message="Cannot deactivate a threat currently in progress",
             )
-        if is_field_unit and threat.assigned_to_id != current_user.id:
+        elif is_field_unit and threat.assigned_to_id != current_user.id:
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
                 message="Field squads can only deactivate threats assigned to them",
             )
-        threat.status = "inactive"
+        else:
+            threat.status = "inactive"
     elif req.status == "active":
         threat.status = "active"
 
