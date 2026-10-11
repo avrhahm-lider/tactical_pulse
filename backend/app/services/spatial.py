@@ -55,7 +55,7 @@ async def get_visible_squads_query(caller: User, caller_coords: Optional[Tuple[f
             and_(
                 User.status == "active",
                 MapEntity.status == "active",
-                User.role.in_(["Squad", "SapperSquad", "Radar"]),
+                User.role.in_(["Squad", "SapperSquad", "Radar", "AreaCommandCenter"]),
             )
         )
     )

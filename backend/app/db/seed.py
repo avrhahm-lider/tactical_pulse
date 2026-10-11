@@ -112,23 +112,41 @@ async def seed_database() -> None:
         ]
         session.add_all(golani_soldiers + paratrooper_soldiers)
 
-        # 3. Add Map Entities for Field Units (SRID 4326: lon lat)
+        # 3. Add Map Entities for Field Units and Regional Command Headquarters (SRID 4326: lon lat)
         map_entities = [
             MapEntity(
+                id=cmd_north.id,
+                geom=WKTElement("POINT(35.3000 33.0000)", srid=4326),
+                heading=0.0,
+                status="active",
+            ),
+            MapEntity(
+                id=cmd_center.id,
+                geom=WKTElement("POINT(34.8000 32.1000)", srid=4326),
+                heading=0.0,
+                status="active",
+            ),
+            MapEntity(
+                id=cmd_south.id,
+                geom=WKTElement("POINT(34.7000 31.2000)", srid=4326),
+                heading=0.0,
+                status="active",
+            ),
+            MapEntity(
                 id=squad_golani.id,
-                geom=WKTElement(f"POINT(34.7818 32.0853)", srid=4326),
+                geom=WKTElement("POINT(34.7818 32.0853)", srid=4326),
                 heading=90.0,
                 status="active",
             ),
             MapEntity(
                 id=squad_paratroopers.id,
-                geom=WKTElement(f"POINT(34.7890 32.0920)", srid=4326),
+                geom=WKTElement("POINT(34.7890 32.0920)", srid=4326),
                 heading=180.0,
                 status="active",
             ),
             MapEntity(
                 id=radar_post.id,
-                geom=WKTElement(f"POINT(35.5000 33.1500)", srid=4326),
+                geom=WKTElement("POINT(35.5000 33.1500)", srid=4326),
                 heading=45.0,
                 status="active",
             ),

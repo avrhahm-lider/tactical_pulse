@@ -13,9 +13,15 @@ import { SimulatorControls } from './components/Dashboard/SimulatorControls'
 
 export const App: React.FC = () => {
   const { user, isAuthenticated, isLoading, initAuth } = useAuthStore()
-  const { threats, selectedEntity, setSelectedEntity, loadSnapshot } = useMapStore()
+  const {
+    threats,
+    selectedEntity,
+    setSelectedEntity,
+    loadSnapshot,
+    isThreatModalOpen,
+    setIsThreatModalOpen,
+  } = useMapStore()
 
-  const [isThreatModalOpen, setIsThreatModalOpen] = useState(false)
   const [isUnitDrawerOpen, setIsUnitDrawerOpen] = useState(false)
 
   // Session rehydration on mount

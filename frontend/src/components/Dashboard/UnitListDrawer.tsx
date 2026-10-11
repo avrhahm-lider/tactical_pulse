@@ -98,14 +98,16 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({ isOpen, onClose 
                   </div>
                   <span
                     className={`text-[9px] px-1.5 py-0.5 rounded border font-semibold ${
-                      sq.role === 'SapperSquad'
+                      sq.role === 'AreaCommandCenter'
+                        ? 'bg-purple-950/70 text-purple-300 border-purple-700 shadow-[0_0_8px_rgba(168,85,247,0.4)]'
+                        : sq.role === 'SapperSquad'
                         ? 'bg-amber-950/70 text-amber-300 border-amber-700'
                         : sq.role === 'Radar'
                         ? 'bg-blue-950/70 text-blue-300 border-blue-700'
                         : 'bg-emerald-950/70 text-emerald-300 border-emerald-700'
                     }`}
                   >
-                    {sq.role}
+                    {sq.role === 'AreaCommandCenter' ? 'REGIONAL HQ' : sq.role}
                   </span>
                 </div>
 

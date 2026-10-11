@@ -6,6 +6,7 @@ import {
   Users,
   LogOut,
   PlusCircle,
+  Compass,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useMapStore } from '../../store/useMapStore'
@@ -22,7 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
   isUnitDrawerOpen,
 }) => {
   const { user, logout } = useAuthStore()
-  const { squads, threats } = useMapStore()
+  const { squads, threats, selectedZoneFilter, setSelectedZoneFilter } = useMapStore()
 
   const activeThreatCount = Object.values(threats).filter(
     (t) => t.status === 'active' && t.engagement_status !== 'resolved'
@@ -84,6 +85,38 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="font-bold text-red-400">{activeThreatCount}</span>
           </div>
         </div>
+
+        {/* Manager Sector Control (MainCommandCenter Supreme Operational View) */}
+        {user?.role === 'MainCommandCenter' && (
+          <div className="hidden xl:flex items-center space-x-1 pl-6 border-l border-slate-800">
+            <span className="text-[11px] font-mono text-cyan-400 font-bold flex items-center gap-1.5 mr-1">
+              <Compass className="w-3.5 h-3.5" />
+              SECTOR:
+            </span>
+            {(['Global', 'North', 'Center', 'South'] as const).map((zone) => {
+              const isActive = selectedZoneFilter === zone
+              return (
+                <button
+                  key={zone}
+                  onClick={() => setSelectedZoneFilter(zone)}
+                  className={`px-2.5 py-1 rounded text-[10px] font-mono font-bold tracking-wider transition-all cursor-pointer border ${
+                    isActive
+                      ? zone === 'North'
+                        ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(0,229,255,0.4)]'
+                        : zone === 'Center'
+                        ? 'bg-amber-950 border-amber-400 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.4)]'
+                        : zone === 'South'
+                        ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
+                        : 'bg-purple-950 border-purple-400 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.4)]'
+                      : 'bg-slate-900/60 hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {zone === 'Global' ? 'GLOBAL (ALL)' : zone.toUpperCase()}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Right: Actions & User Info */}

@@ -27,8 +27,13 @@ interface MapState {
   isPickingLocationOnMap: boolean
   pickedLocation: { lat: number; lon: number } | null
   proximityAlerts: Threat[]
+<<<<<<< HEAD
   dangerZoneAlerts: DangerZoneAlert[]
   dismissedDangerAlertIds: string[]
+=======
+  isThreatModalOpen: boolean
+  selectedZoneFilter: 'Global' | 'North' | 'Center' | 'South'
+>>>>>>> 07a3ccd (fix(map): enable map click alert opening, regional headquarters markers, and manager zone controls)
 
   loadSnapshot: () => Promise<void>
   updateSquadPosition: (payload: SquadMovedPayload, currentUserId?: string) => void
@@ -40,6 +45,9 @@ interface MapState {
   setSelectedEntity: (entity: { type: 'squad' | 'threat'; id: string } | null) => void
   setIsPickingLocationOnMap: (isPicking: boolean) => void
   setPickedLocation: (loc: { lat: number; lon: number } | null) => void
+  setIsThreatModalOpen: (isOpen: boolean) => void
+  setSelectedZoneFilter: (zone: 'Global' | 'North' | 'Center' | 'South') => void
+  openAlertAtLocation: (lat: number, lon: number) => void
   dismissAlert: (threatId: string) => void
   checkProximityAlerts: (userLat: number, userLon: number) => void
 }
@@ -53,8 +61,13 @@ export const useMapStore = create<MapState>((set, get) => ({
   isPickingLocationOnMap: false,
   pickedLocation: null,
   proximityAlerts: [],
+<<<<<<< HEAD
   dangerZoneAlerts: [],
   dismissedDangerAlertIds: [],
+=======
+  isThreatModalOpen: false,
+  selectedZoneFilter: 'Global',
+>>>>>>> 07a3ccd (fix(map): enable map click alert opening, regional headquarters markers, and manager zone controls)
 
   loadSnapshot: async () => {
     set({ isLoading: true, error: null })
@@ -269,6 +282,14 @@ export const useMapStore = create<MapState>((set, get) => ({
   setSelectedEntity: (selectedEntity) => set({ selectedEntity }),
   setIsPickingLocationOnMap: (isPickingLocationOnMap) => set({ isPickingLocationOnMap }),
   setPickedLocation: (pickedLocation) => set({ pickedLocation }),
+  setIsThreatModalOpen: (isThreatModalOpen) => set({ isThreatModalOpen }),
+  setSelectedZoneFilter: (selectedZoneFilter) => set({ selectedZoneFilter }),
+  openAlertAtLocation: (lat, lon) =>
+    set({
+      pickedLocation: { lat, lon },
+      isPickingLocationOnMap: false,
+      isThreatModalOpen: true,
+    }),
 
   dismissAlert: (threatId) => {
     set((state) => ({
