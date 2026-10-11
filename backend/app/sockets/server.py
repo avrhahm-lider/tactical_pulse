@@ -52,52 +52,39 @@ async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
         if not user_id_str or payload.get("type") != "access":
             return False
         user_id = UUID(user_id_str)
-    except Exception:
+        role = payload.get("role", "Squad")
+        area = payload.get("area", "Center")
+    except Exception as e:
+        print(f"[AUTH EXCEPTION] Invalid JWT handshake: {e}")
         return False
+
+    client_info = {
+        "user_id": user_id,
+        "username": payload.get("username", str(user_id)),
+        "role": role,
+        "area": area,
+        "lat": None,
+        "lon": None,
+    }
+    _connected_clients[sid] = client_info
 
     try:
-        async with async_session_maker() as session:
-            stmt = select(User).where(User.id == user_id)
-            res = await session.execute(stmt)
-            user = res.scalar_one_or_none()
+        await sio.save_session(sid, client_info)
+    except Exception:
+        pass
 
-            if not user or user.status != "active":
-                return False
+    # Automatically join role & zone rooms after handshake completes
+    async def _join_rooms():
+        await asyncio.sleep(0.05)
+        try:
+            await sio.enter_room(sid, f"role_{role}")
+            if area:
+                await sio.enter_room(sid, f"zone_{area}")
+        except Exception:
+            pass
 
-            # Load initial coordinates if field unit
-            map_stmt = select(MapEntity).where(MapEntity.id == user_id)
-            map_res = await session.execute(map_stmt)
-            map_ent = map_res.scalar_one_or_none()
-
-            client_info = {
-                "user_id": user.id,
-                "username": user.username,
-                "role": user.role,
-                "area": user.area,
-                "lat": None,
-                "lon": None,
-            }
-            _connected_clients[sid] = client_info
-            try:
-                await sio.save_session(sid, client_info)
-            except Exception:
-                pass
-
-        # Automatically join role & zone rooms after handshake completes
-        async def _join_rooms():
-            await asyncio.sleep(0.05)
-            try:
-                await sio.enter_room(sid, f"role_{user.role}")
-                if user.area:
-                    await sio.enter_room(sid, f"zone_{user.area}")
-            except Exception:
-                pass
-
-        asyncio.create_task(_join_rooms())
-        return True
-    except Exception as e:
-        print(f"[CONNECT EXCEPTION] {type(e).__name__}: {e}")
-        return False
+    asyncio.create_task(_join_rooms())
+    return True
 
 
 @sio.event
