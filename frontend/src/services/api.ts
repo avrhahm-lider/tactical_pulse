@@ -54,6 +54,18 @@ apiClient.interceptors.response.use(
       }
     }
 
+    // Log all API errors to console for developer visibility
+    console.error(
+      `%c[Tactical Pulse API Error] ${error.config?.method?.toUpperCase() || 'REQUEST'} ${error.config?.url}`,
+      'color: #ef4444; font-weight: bold;',
+      {
+        message: error.message,
+        code: error.code,
+        status: error.response?.status ?? 'No Response (Server unreachable)',
+        data: error.response?.data,
+      }
+    )
+
     return Promise.reject(error)
   }
 )

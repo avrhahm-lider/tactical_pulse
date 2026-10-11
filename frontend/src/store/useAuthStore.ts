@@ -28,11 +28,36 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: data.user, isAuthenticated: true, isLoading: false, error: null })
       return true
     } catch (err: unknown) {
-      let message = 'Login failed. Please check credentials.'
-      if (err && typeof err === 'object' && 'response' in err) {
-        const axiosErr = err as { response?: { data?: { error?: { message?: string } } } }
-        message = axiosErr.response?.data?.error?.message || message
+      const axiosErr = err as {
+        message?: string
+        code?: string
+        response?: { status?: number; data?: { error?: { message?: string; code?: string } } }
       }
+
+      console.group('%c[Tactical Pulse] Authentication Error Details', 'color: #ef4444; font-weight: bold; font-size: 12px;')
+      console.error('Target Endpoint:', 'http://localhost:8000/api/v1/auth/login')
+      console.error('Error Code:', axiosErr.code || 'UNKNOWN')
+      console.error('Error Message:', axiosErr.message || 'No message')
+      console.error('HTTP Status:', axiosErr.response?.status ?? 'None (No response received from server)')
+      console.error('Server Response Data:', axiosErr.response?.data ?? 'None')
+      console.error('Full Error Object:', err)
+      console.groupEnd()
+
+      let message = 'Login failed. Please check credentials.'
+
+      if (!axiosErr.response) {
+        // No HTTP response was received — server is offline, port is closed, or CORS failed
+        message = `Cannot reach backend server at http://localhost:8000 (${axiosErr.code || 'ERR_CONNECTION_REFUSED'}). Is the FastAPI backend running?`
+      } else if (axiosErr.response.data?.error?.message) {
+        message = `${axiosErr.response.data.error.message} (${axiosErr.response.status})`
+      } else if (axiosErr.response.status === 401) {
+        message = 'Invalid username or password (401 Unauthorized).'
+      } else if (axiosErr.response.status === 429) {
+        message = 'Too many login attempts. Account temporarily locked (429 Rate Limited).'
+      } else {
+        message = `Server returned HTTP ${axiosErr.response.status}.`
+      }
+
       set({ error: message, isLoading: false, isAuthenticated: false, user: null })
       return false
     }
