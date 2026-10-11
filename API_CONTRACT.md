@@ -591,7 +591,7 @@ CREATE INDEX idx_audit_action ON audit_log(action, created_at);
 | **Backend REST API** | `http://localhost:8000/api/v1` | FastAPI with CORS configured for `http://localhost:5173` |
 | **Backend WebSocket** | `http://localhost:8000` (path: `/socket.io`) | python-socketio ASGI mount |
 | **Frontend Dev Server** | `http://localhost:5173` | Vite dev server |
-| **Database** | `localhost:5432` | PostgreSQL + PostGIS via Docker Compose |
+| **Database** | Supabase (Cloud) | PostgreSQL 15+ with PostGIS extension |
 
 ---
 

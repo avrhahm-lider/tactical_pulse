@@ -124,7 +124,7 @@ To ensure smooth parallel execution between **Backend Agent** and **Frontend Age
 
 ### Backend Agent Scope (`backend/mvp` branch)
 * **Milestone B1: Database & Core**
-  * PostgreSQL + PostGIS (Supabase / Docker) configuration.
+  * PostgreSQL + PostGIS (Supabase) configuration.
   * SQLAlchemy async models: `User`, `Soldier`, `MapEntity`, `Threat`, `AuditLog`, `Message`.
   * Automatic schema initialization (`Base.metadata.create_all`) and DDL SQL script.
   * Database seeder script (`seed.py`) with all test users, squads, and threats.
@@ -174,7 +174,7 @@ To ensure smooth parallel execution between **Backend Agent** and **Frontend Age
   * Client APIs & Leaflet: `lat, lon` (Latitude first).
   * PostGIS Geometry: `ST_MakePoint(lon, lat)` (Longitude first, standard WGS 84 / SRID 4326).
 * **Security**: JWT with refresh token rotation, rate limiting on authentication, bcrypt password hashing, audit logging (TLS/HTTPS deferred to Phase 2).
-* **Testing & Tools**: Pytest, Supabase / Docker Compose.
+* **Testing & Tools**: Pytest, Supabase.
 * **Ports**:
   * Backend API: `http://localhost:8000/api/v1`
   * Backend Socket: `http://localhost:8000` (`/socket.io`)
@@ -225,7 +225,5 @@ backend/
 │   ├── sockets/            # Socket.IO setup, auth handshake, location & threat broadcasts
 │   └── main.py             # FastAPI & Socket.IO app bootstrap
 ├── simulator/              # CLI script to simulate movements & live telemetry
-├── docker-compose.yml      # Local dev environment (Postgres + PostGIS)
-├── Dockerfile
 └── requirements.txt
 ```
