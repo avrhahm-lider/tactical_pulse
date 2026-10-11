@@ -189,10 +189,11 @@ async def update_threat(
                 message=f"AreaCommandCenter '{current_user.area}' cannot modify threats outside its assigned sector",
             )
 
-    # 2. Field Unit Proximity Restriction (20 km)
-    is_field_unit = current_user.role in ["Squad", "SapperSquad", "Radar"]
+    # 2. Field Unit Proximity Restriction (20 km for ground tactical units; radar monitors aerial drones)
+    is_ground_unit = current_user.role in ["Squad", "SapperSquad"]
+    is_radar_drone_update = current_user.role == "Radar" and threat.threat_type == "drone"
     caller_coords = await get_caller_coordinates(session, current_user.id)
-    if is_field_unit:
+    if is_ground_unit or (current_user.role == "Radar" and not is_radar_drone_update):
         if not caller_coords:
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
