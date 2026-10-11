@@ -1,3 +1,4 @@
+import asyncio
 import socketio
 from datetime import datetime, timezone
 from uuid import UUID
@@ -82,10 +83,17 @@ async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
             except Exception:
                 pass
 
-        # Automatically join role & zone rooms
-        await sio.enter_room(sid, f"role_{user.role}")
-        if user.area:
-            await sio.enter_room(sid, f"zone_{user.area}")
+        # Automatically join role & zone rooms after handshake completes
+        async def _join_rooms():
+            await asyncio.sleep(0.05)
+            try:
+                await sio.enter_room(sid, f"role_{user.role}")
+                if user.area:
+                    await sio.enter_room(sid, f"zone_{user.area}")
+            except Exception:
+                pass
+
+        asyncio.create_task(_join_rooms())
         return True
     except Exception as e:
         print(f"[CONNECT EXCEPTION] {type(e).__name__}: {e}")

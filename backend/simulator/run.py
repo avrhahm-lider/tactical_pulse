@@ -36,7 +36,7 @@ async def simulate_movement(username: str = "squad_golani", password: str = "squ
     print(f"[SIMULATOR] Starting Tactical Movement Simulator for unit: '{username}'")
     
     # 1. Login via REST
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             resp = await client.post(
                 f"{BASE_HTTP_URL}/auth/login",
