@@ -65,7 +65,7 @@ async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
 
     client_info = {
         "user_id": user_id,
-        "username": payload.get("username", str(user_id)),
+        "username": payload.get("name") or payload.get("username") or str(user_id),
         "role": role,
         "area": area,
         "lat": None,
@@ -133,61 +133,19 @@ async def location_update(sid: str, data: dict):
     if not (settings.LAT_MIN <= lat <= settings.LAT_MAX and settings.LON_MIN <= lon <= settings.LON_MAX):
         return
 
+    client["lat"] = lat
+    client["lon"] = lon
+
     new_area = calculate_area_from_lat(lat)
     now = datetime.now(timezone.utc)
 
-    async with async_session_maker() as session:
-        map_stmt = select(MapEntity).where(MapEntity.id == client["user_id"])
-        map_res = await session.execute(map_stmt)
-        map_ent = map_res.scalar_one_or_none()
+    # 1. Update in-memory unit state immediately
+    client["lat"] = lat
+    client["lon"] = lon
+    old_area = client.get("area")
+    client["area"] = new_area
 
-        if map_ent:
-            map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-            map_ent.heading = heading
-            map_ent.updated_at = now
-        else:
-            map_ent = MapEntity(
-                id=client["user_id"],
-                geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                heading=heading,
-                status="active",
-                updated_at=now,
-            )
-            session.add(map_ent)
-
-        # Update user area if crossed border
-        user_stmt = select(User).where(User.id == client["user_id"])
-        user_res = await session.execute(user_stmt)
-        user_obj = user_res.scalar_one_or_none()
-        if user_obj and user_obj.area != new_area:
-            user_obj.area = new_area
-            # Update socket room membership
-            await sio.leave_room(sid, f"zone_{client['area']}")
-            await sio.enter_room(sid, f"zone_{new_area}")
-            client["area"] = new_area
-
-        # Preload _active_threats_cache if empty
-        if not _active_threats_cache:
-            threats_q = await session.execute(
-                select(Threat, ST_Y(Threat.geom), ST_X(Threat.geom)).where(Threat.status == "active")
-            )
-            for t, t_lat, t_lon in threats_q.all():
-                _active_threats_cache[str(t.id)] = {
-                    "id": str(t.id),
-                    "name": t.name,
-                    "threat_type": t.threat_type,
-                    "severity_level": t.severity_level,
-                    "engagement_status": t.engagement_status,
-                    "radius": t.radius,
-                    "lat": t_lat,
-                    "lon": t_lon,
-                    "altitude": t.altitude,
-                    "status": t.status,
-                }
-
-        await session.commit()
-
-    # Broadcast squad_moved payload
+    # 2. Broadcast squad_moved payload with zero DB latency
     squad_moved_payload = {
         "id": str(client["user_id"]),
         "lat": lat,
@@ -196,8 +154,6 @@ async def location_update(sid: str, data: dict):
         "area": new_area,
         "updated_at": now.isoformat(),
     }
-
-    # Dispatch to authorized clients
     await broadcast_to_visibility_range(
         origin_lat=lat,
         origin_lon=lon,
@@ -206,8 +162,68 @@ async def location_update(sid: str, data: dict):
         payload=squad_moved_payload,
     )
 
-    # Check if squad is inside any active danger zones
+    # 3. Immediately evaluate danger zone perimeter breach
     await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
+
+    # 4. Handle zone room migration if border crossed
+    if old_area and old_area != new_area:
+        try:
+            await sio.leave_room(sid, f"zone_{old_area}")
+            await sio.enter_room(sid, f"zone_{new_area}")
+        except Exception:
+            pass
+
+    # 5. Persist to Postgres safely without blocking real-time WebSocket telemetry
+    try:
+        async with async_session_maker() as session:
+            map_stmt = select(MapEntity).where(MapEntity.id == client["user_id"])
+            map_res = await session.execute(map_stmt)
+            map_ent = map_res.scalar_one_or_none()
+
+            if map_ent:
+                map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                map_ent.heading = heading
+                map_ent.updated_at = now
+            else:
+                map_ent = MapEntity(
+                    id=client["user_id"],
+                    geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
+                    heading=heading,
+                    status="active",
+                    updated_at=now,
+                )
+                session.add(map_ent)
+
+            if old_area and old_area != new_area:
+                user_stmt = select(User).where(User.id == client["user_id"])
+                user_res = await session.execute(user_stmt)
+                user_obj = user_res.scalar_one_or_none()
+                if user_obj:
+                    user_obj.area = new_area
+
+            # Preload _active_threats_cache if empty
+            if not _active_threats_cache:
+                threats_q = await session.execute(
+                    select(Threat, ST_Y(Threat.geom), ST_X(Threat.geom)).where(Threat.status == "active")
+                )
+                for t, t_lat, t_lon in threats_q.all():
+                    _active_threats_cache[str(t.id)] = {
+                        "id": str(t.id),
+                        "name": t.name,
+                        "threat_type": t.threat_type,
+                        "severity_level": t.severity_level,
+                        "engagement_status": t.engagement_status,
+                        "radius": t.radius,
+                        "lat": t_lat,
+                        "lon": t_lon,
+                        "altitude": t.altitude,
+                        "status": t.status,
+                    }
+
+            await session.commit()
+    except Exception:
+        # Prevent database session spikes from interrupting real-time location stream
+        pass
 
 
 import math

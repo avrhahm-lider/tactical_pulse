@@ -114,7 +114,12 @@ async def login(
 
     record_successful_attempt(req.username, client_ip)
 
-    extra_claims = {"role": user.role, "area": user.area}
+    extra_claims = {
+        "role": user.role,
+        "area": user.area,
+        "username": user.username,
+        "name": user.name,
+    }
     access_token = create_access_token(subject=str(user.id), extra_claims=extra_claims)
     refresh_token = create_refresh_token(subject=str(user.id))
 
