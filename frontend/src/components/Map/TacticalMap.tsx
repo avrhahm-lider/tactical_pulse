@@ -77,6 +77,15 @@ const SECTOR_DEFS: Record<'North' | 'Center' | 'South', SectorConfig> = {
   },
 }
 
+// Check if an entity is a dynamic operational force (excluding static headquarters)
+function isDynamicForce(squad: Squad): boolean {
+  return (
+    squad.status !== 'inactive' &&
+    squad.role !== 'AreaCommandCenter' &&
+    squad.role !== 'MainCommandCenter'
+  )
+}
+
 // Build tactical pop-up ("prop") HTML containing basic force details
 function buildForcePopupHtml(squad: Squad, isStaleSignal: boolean): string {
   const isHQ = squad.role === 'AreaCommandCenter'
@@ -116,11 +125,11 @@ function buildForcePopupHtml(squad: Squad, isStaleSignal: boolean): string {
       <div class="prop-body">
         <div class="prop-row">
           <span class="prop-label">SECTOR:</span>
-          <span class="prop-val">${squad.area.toUpperCase()}</span>
+          <span class="prop-val">${squad.area ? squad.area.toUpperCase() : 'UNKNOWN'}</span>
         </div>
         <div class="prop-row">
           <span class="prop-label">POSITION:</span>
-          <span class="prop-val font-mono">${squad.lat.toFixed(4)}°, ${squad.lon.toFixed(4)}°</span>
+          <span class="prop-val font-mono">${squad.lat.toFixed(5)}°, ${squad.lon.toFixed(5)}°</span>
         </div>
         <div class="prop-row">
           <span class="prop-label">HEADING:</span>
@@ -129,25 +138,28 @@ function buildForcePopupHtml(squad: Squad, isStaleSignal: boolean): string {
         <div class="prop-row">
           <span class="prop-label">TELEMETRY:</span>
           <span class="prop-val" style="color: ${isStaleSignal ? '#f59e0b' : '#10b981'}; font-weight: bold;">
-            ${isStaleSignal ? 'STALE (>60s)' : 'ONLINE'}
+            ${isStaleSignal ? 'SIGNAL STALE (>60s)' : 'ONLINE'}
           </span>
         </div>
         ${
           soldiersCount > 0
             ? `
-        <div class="prop-row">
-          <span class="prop-label">PERSONNEL:</span>
-          <span class="prop-val">${soldiersCount} Operatives</span>
+        <div class="prop-row" style="margin-top: 3px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 3px;">
+          <span class="prop-label">OPERATIVES:</span>
+          <span class="prop-val">${soldiersCount} Soldiers</span>
+        </div>
+        <div style="font-size: 9px; color: #94a3b8; margin-top: 2px;">
+          ${squad.soldiers.map((s) => `<div style="display: flex; justify-content: space-between;"><span>• ${s.name}</span><span style="color: #64748b;">${s.role}</span></div>`).join('')}
         </div>`
             : ''
         }
       </div>
-      <div class="prop-footer">CLICK OBJECT AGAIN TO CLOSE</div>
+      <div class="prop-footer">CLICK FORCE TO CLOSE</div>
     </div>
   `
 }
 
-// Extract coordinates of all active objects relevant to user's assigned sector or view filter
+// Extract coordinates of all relevant active dynamic objects (ignoring static headquarters)
 function getRelevantCoordinates(
   user: User | null,
   zoneFilter: 'Global' | 'North' | 'Center' | 'South',
@@ -156,33 +168,44 @@ function getRelevantCoordinates(
 ): [number, number][] {
   let targetSector: 'Global' | 'North' | 'Center' | 'South' = 'Global'
   if (user?.role === 'AreaCommandCenter') {
-    targetSector = (user.area as 'North' | 'Center' | 'South') || 'North'
+    targetSector = (user.area as 'North' | 'Center' | 'South') || 'Center'
   } else if (user?.role === 'MainCommandCenter') {
     targetSector = zoneFilter
   } else if (user?.area && user.area !== 'Global') {
     targetSector = user.area as 'North' | 'Center' | 'South'
+  } else if (user?.id && squads[user.id]) {
+    const my = squads[user.id]
+    if (my.area && my.area !== 'Global') {
+      targetSector = my.area as 'North' | 'Center' | 'South'
+    } else if (my.lat >= 32.70) {
+      targetSector = 'North'
+    } else if (my.lat >= 31.90) {
+      targetSector = 'Center'
+    } else {
+      targetSector = 'South'
+    }
   }
 
   const isSectorMatch = (lat: number, area?: string) => {
     if (targetSector === 'Global') return true
     if (area && area === targetSector) return true
-    if (targetSector === 'North') return lat >= 32.7
-    if (targetSector === 'Center') return lat >= 31.9 && lat < 32.7
-    if (targetSector === 'South') return lat < 31.9
+    if (targetSector === 'North') return lat >= 32.70
+    if (targetSector === 'Center') return lat >= 31.90 && lat < 32.70
+    if (targetSector === 'South') return lat < 31.90
     return false
   }
 
   const points: [number, number][] = []
 
-  // Add squads in sector
+  // Add ONLY active dynamic forces (static objects like headquarters are completely ignored for zoom)
   Object.values(squads).forEach((sq) => {
-    if (sq.status === 'inactive') return
+    if (!isDynamicForce(sq)) return
     if (isSectorMatch(sq.lat, sq.area)) {
       points.push([sq.lat, sq.lon])
     }
   })
 
-  // Add active threats in sector
+  // Add active alerts / threats
   Object.values(threats).forEach((th) => {
     if (th.status === 'inactive') return
     if (isSectorMatch(th.lat)) {
@@ -593,12 +616,15 @@ export const TacticalMap: React.FC = () => {
       }
 
       // Icon HTML
+      const iconWidth = isHQ ? 42 : 36
+      const iconHeight = isHQ ? 42 : 36
+
       const iconHtml = isHQ
         ? `
-          <div style="position: relative; transform: translate(-50%, -50%); cursor: pointer; text-align: center;">
+          <div style="position: relative; width: 42px; height: 42px; cursor: pointer; pointer-events: auto;">
             <div style="
-              width: 38px;
-              height: 38px;
+              width: 42px;
+              height: 42px;
               background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
               border: 2px solid ${isMe ? '#ffffff' : '#c084fc'};
               border-radius: 8px;
@@ -608,12 +634,15 @@ export const TacticalMap: React.FC = () => {
               box-shadow: 0 0 ${isMe ? '18px #c084fc' : '12px rgba(168, 85, 247, 0.6)'};
               transition: transform 0.2s ease;
             ">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="#ffffff" stroke="#000000" stroke-width="1.2">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="#ffffff" stroke="#000000" stroke-width="1.2">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
               </svg>
             </div>
             <div style="
-              margin-top: 4px;
+              position: absolute;
+              top: 46px;
+              left: 50%;
+              transform: translateX(-50%);
               background: rgba(15, 10, 30, 0.95);
               color: #ffffff;
               font-size: 10px;
@@ -624,16 +653,17 @@ export const TacticalMap: React.FC = () => {
               border: 1px solid #a855f7;
               white-space: nowrap;
               box-shadow: 0 2px 8px rgba(0,0,0,0.8);
+              pointer-events: none;
             ">
               ★ ${squad.name} [${squad.area} HQ]
             </div>
           </div>
         `
         : `
-          <div style="position: relative; transform: translate(-50%, -50%); cursor: pointer; text-align: center;">
+          <div style="position: relative; width: 36px; height: 36px; cursor: pointer; pointer-events: auto;">
             <div style="
-              width: 32px;
-              height: 32px;
+              width: 36px;
+              height: 36px;
               background: ${baseColor};
               border: 2px solid ${isMe ? '#ffffff' : 'rgba(255,255,255,0.7)'};
               border-radius: 50%;
@@ -644,20 +674,25 @@ export const TacticalMap: React.FC = () => {
               transform: rotate(${squad.heading || 0}deg);
               transition: transform 0.3s ease;
             ">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <polygon points="12 2 19 21 12 17 5 21 12 2"></polygon>
               </svg>
             </div>
             <div style="
-              margin-top: 4px;
-              background: rgba(10, 15, 29, 0.85);
+              position: absolute;
+              top: 40px;
+              left: 50%;
+              transform: translateX(-50%);
+              background: rgba(10, 15, 29, 0.9);
               color: ${stale ? '#9ca3af' : '#ffffff'};
               font-size: 10px;
               font-family: ui-monospace, monospace;
-              padding: 1px 4px;
+              padding: 1px 5px;
               border-radius: 3px;
               border: 1px solid ${baseColor};
               white-space: nowrap;
+              pointer-events: none;
+              box-shadow: 0 2px 6px rgba(0,0,0,0.6);
             ">
               ${squad.name} [${roleLabel}]
             </div>
@@ -667,7 +702,8 @@ export const TacticalMap: React.FC = () => {
       const customIcon = L.divIcon({
         className: 'squad-marker-container',
         html: iconHtml,
-        iconSize: [0, 0],
+        iconSize: [iconWidth, iconHeight],
+        iconAnchor: [iconWidth / 2, iconHeight / 2],
       })
 
       const popupHtml = buildForcePopupHtml(squad, stale && !isHQ)
@@ -680,28 +716,31 @@ export const TacticalMap: React.FC = () => {
         marker.setIcon(customIcon)
         marker.setPopupContent(popupHtml)
       } else {
-        marker = L.marker([squad.lat, squad.lon], { icon: customIcon })
-        marker.bindPopup(popupHtml, {
+        const newMarker = L.marker([squad.lat, squad.lon], { icon: customIcon })
+        newMarker.bindPopup(popupHtml, {
           className: 'tactical-force-popup',
-          closeButton: false,
+          closeButton: true,
           autoClose: false,
           closeOnClick: false,
-          offset: [0, isHQ ? -28 : -22],
+          offset: [0, isHQ ? -24 : -18],
         })
 
-        // Clicking the object opens pop-up; clicking it again closes it
-        marker.on('click', (e) => {
+        // Unregister Leaflet's internal auto-open click handler so it doesn't conflict with our toggle
+        newMarker.off(
+          'click',
+          (newMarker as unknown as { _openPopup: (e: L.LeafletMouseEvent) => void })._openPopup,
+          newMarker
+        )
+
+        // Custom toggle on click: clicking the object opens pop-up; clicking it again closes it
+        newMarker.on('click', (e) => {
           L.DomEvent.stopPropagation(e)
-          if (marker!.isPopupOpen()) {
-            marker!.closePopup()
-          } else {
-            marker!.openPopup()
-          }
+          newMarker.togglePopup()
           setSelectedEntity({ type: 'squad', id: squad.id })
         })
 
-        marker.addTo(markersLayer)
-        squadMarkersRef.current.set(squad.id, marker)
+        newMarker.addTo(markersLayer)
+        squadMarkersRef.current.set(squad.id, newMarker)
       }
     })
   }, [squads, user, setSelectedEntity])
