@@ -53,12 +53,36 @@ export const TacticalMap: React.FC = () => {
       zoomControl: false,
     })
 
-    // Custom dark tactical tiles (CartoDB Dark Matter)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-      subdomains: 'abcd',
-      maxZoom: 19,
-    }).addTo(map)
+    // Tactical dark base tiles (Esri Dark Gray - 100% Free, No API Key, No Watermark)
+    const darkTiles = L.tileLayer(
+      'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri &mdash; Tactical C2',
+        maxZoom: 16,
+      }
+    )
+
+    // Real satellite imagery layer (Esri World Imagery - Free, No API Key)
+    const satelliteTiles = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: '&copy; Esri, Maxar &mdash; Satellite',
+        maxZoom: 18,
+      }
+    )
+
+    darkTiles.addTo(map)
+
+    L.control
+      .layers(
+        {
+          'Tactical Dark': darkTiles,
+          'Satellite View': satelliteTiles,
+        },
+        undefined,
+        { position: 'bottomleft' }
+      )
+      .addTo(map)
 
     L.control.zoom({ position: 'bottomright' }).addTo(map)
 
