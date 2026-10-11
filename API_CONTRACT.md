@@ -46,7 +46,7 @@ The map of Israel is divided into three operational areas defined by latitude bo
 
 ### Coordinate Convention:
 * **APIs, Payloads & Leaflet**: `{ "lat": Float, "lon": Float }` or `[lat, lon]` (Latitude first).
-* **PostGIS SQL**: `ST_SetSRID(ST_MakePoint(lon, lat), 4326)` (**Longitude first**, WGS 84). Valid operational boundaries: Israel Theater ($\text{Lat} \in [29.0, 33.5], \text{Lon} \in [34.0, 36.0]$).
+* **PostGIS SQL**: `ST_SetSRID(ST_MakePoint(lon, lat), 4326)` (**Longitude first**, WGS 84). Valid operational boundaries: Israel Theater ($\text{Lat} \in [29.0, 34.0], \text{Lon} \in [33.5, 36.5]$).
 
 ---
 
@@ -54,10 +54,15 @@ The map of Israel is divided into three operational areas defined by latitude bo
 
 Base URL: `http://<host>:8000/api/v1`
 
-Standard Error Response Format:
+All endpoints follow the unified Error Response Format defined in **Section 5**:
 ```json
 {
-  "detail": "Descriptive error message"
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Descriptive human-readable error message",
+    "status": 400,
+    "details": {}
+  }
 }
 ```
 
@@ -119,6 +124,8 @@ Standard Error Response Format:
     ```json
     {
       "access_token": "eyJhbGciOi...(new)...",
+      "refresh_token": "dGhpcyBpcyBh...(rotated)...",
+      "token_type": "bearer",
       "expires_in": 3600
     }
     ```
@@ -266,6 +273,7 @@ Standard Error Response Format:
   * **Headers:** `Authorization: Bearer <JWT>`
   * **Description:** Updates engagement status (e.g. `in_progress`, `resolved`), assigned squad, coordinates (movable only), danger radius, or deactivates threat (`status: inactive`). Validates RBAC matrix and **broadcasts `threat_updated` via WebSocket** to authorized clients.
   * **Concurrency Control:** If `engagement_status` is being changed to `in_progress`, the server verifies the threat is still `unassigned`. If another squad has already taken responsibility, the server returns `409 Conflict` with the details of the currently assigned squad.
+  * **Coordinate Handling:** For `lat` and `lon`, omitting the field or sending `null` leaves existing coordinates unchanged. For `immovable` threats, sending non-null coordinates is rejected with `400 Bad Request`. For `drone` threats, only `Radar` or `CommandCenter` may provide coordinates.
   * **Request Body (all fields optional):**
     ```json
     {
@@ -299,6 +307,15 @@ Standard Error Response Format:
       "updated_at": "2026-10-08T16:05:00Z"
     }
     ```
+
+* **GET `/threats`**
+  * **Headers:** `Authorization: Bearer <JWT>`
+  * **Query Parameters (optional):**
+    * `status`: Filter by lifecycle status (`active`, `inactive`; default: `active`).
+    * `engagement_status`: Filter by handling status (`unassigned`, `in_progress`, `resolved`).
+    * `threat_type`: Filter by type (`explosive`, `vehicle`, `drone`, `personnel`).
+  * **Description:** Retrieves threats visible to caller based on RBAC and spatial visibility rules.
+  * **Response (200 OK):** Array of Threat objects matching the Threat schema.
 
 ---
 
@@ -515,6 +532,10 @@ CREATE TABLE threats (
     radius FLOAT DEFAULT 150.0,  -- Danger radius buffer in meters
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     created_by_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT valid_threat_type CHECK (
+        (threat_type = 'explosive' AND type = 'immovable') OR
+        (threat_type IN ('vehicle', 'drone', 'personnel') AND type = 'movable')
+    ),
     CONSTRAINT valid_lifecycle CHECK (
         NOT (status = 'inactive' AND engagement_status = 'in_progress')
     ),

@@ -130,12 +130,12 @@ To ensure smooth parallel execution between **Backend Agent** and **Frontend Age
   * Database seeder script (`seed.py`) with all test users, squads, and threats.
 * **Milestone B2: Auth & Admin API**
   * JWT generation, hashing (passlib/bcrypt), role & active status dependencies.
-  * `POST /api/v1/auth/login` and `GET /api/v1/auth/me`.
+  * `POST /api/v1/auth/login`, `GET /api/v1/auth/me`, `POST /api/v1/auth/refresh`, and `POST /api/v1/auth/logout`.
   * `GET /api/v1/admin/users`, `POST /api/v1/admin/users`, `PATCH /api/v1/admin/users/{id}/status`.
 * **Milestone B3: Threats & Map Snapshot API**
   * Spatial query service using PostGIS (`ST_DWithin`, latitude zone boundaries).
   * `GET /api/v1/map/snapshot` with role-based filtering.
-  * `POST /api/v1/threats` and `PATCH /api/v1/threats/{id}` with strict RBAC validation.
+  * `POST /api/v1/threats`, `GET /api/v1/threats`, and `PATCH /api/v1/threats/{id}` with strict RBAC validation.
 * **Milestone B4: Socket.IO Server & Simulator**
   * python-socketio server with JWT handshake authentication and active status enforcement.
   * Handlers for `location_update`, broadcasts for `squad_moved`, `unit_status_changed`, `threat_created`, `threat_updated`.
