@@ -6,15 +6,15 @@ This document defines the formal contract, communication protocol, and database 
 
 ## 1. Zones & Visibility Rules
 
-The map of Israel is divided into three operational areas defined by latitude boundaries:
-* **`North`**: $\text{Lat} \ge 32.7000$
+The map of Israel is divided into three operational areas defined by latitude boundaries within operational bounds ($[29.0, 34.0]$):
+* **`North`**: $32.7000 \le \text{Lat} \le 34.0000$
 * **`Center`**: $31.9000 \le \text{Lat} < 32.7000$
-* **`South`**: $\text{Lat} < 31.9000$
+* **`South`**: $29.0000 \le \text{Lat} < 31.9000$
 
 ### Visibility Permissions:
 1. **`MainCommandCenter`**: Global visibility (`area = 'Global'`) — sees all squads, radars, and threats across all zones without restrictions.
 2. **`AreaCommandCenter`**: Regional visibility — sees all entities and threats located strictly inside its assigned zone (`Center`, `North`, or `South`).
-3. **`Squad` / `SapperSquad` / `Radar`**: Tactical visibility — sees other squads and threats within a **20 km radius** (`20000` meters, calculated in PostGIS via `ST_DWithin(u.geom::geography, target.geom::geography, 20000)`) from their current position.
+3. **`Squad` / `SapperSquad` / `Radar`**: Tactical visibility — sees other squads and threats within a **20 km radius** (`20000` meters, calculated in PostGIS via `ST_DWithin(u.geom::geography, target.geom::geography, 20000)`) from their current position, plus their own unit at distance 0.
 
 ---
 
@@ -271,14 +271,17 @@ All endpoints follow the unified Error Response Format defined in **Section 5**:
 
 * **PATCH `/threats/{threat_id}`**
   * **Headers:** `Authorization: Bearer <JWT>`
-  * **Description:** Updates engagement status (e.g. `in_progress`, `resolved`), assigned squad, coordinates (movable only), danger radius, or deactivates threat (`status: inactive`). Validates RBAC matrix and **broadcasts `threat_updated` via WebSocket** to authorized clients.
+  * **Description:** Updates engagement status (e.g. `in_progress`, `resolved`), assigned squad, coordinates (movable only), danger radius, severity level, description, or deactivates threat (`status: inactive`). Validates RBAC matrix and **broadcasts `threat_updated` via WebSocket** to authorized clients.
   * **Concurrency Control:** If `engagement_status` is being changed to `in_progress`, the server verifies the threat is still `unassigned`. If another squad has already taken responsibility, the server returns `409 Conflict` with the details of the currently assigned squad.
+  * **Unassignment Rule:** If `engagement_status` is transitioned back to `unassigned`, `assigned_to_id` is automatically reset to `null`.
   * **Coordinate Handling:** For `lat` and `lon`, omitting the field or sending `null` leaves existing coordinates unchanged. For `immovable` threats, sending non-null coordinates is rejected with `400 Bad Request`. For `drone` threats, only `Radar` or `CommandCenter` may provide coordinates.
   * **Request Body (all fields optional):**
     ```json
     {
       "engagement_status": "in_progress",
       "assigned_to_id": "e4b2a38a-3652-4a0b-930f-b1e15fa4d921",
+      "severity_level": "high",
+      "description": "Updated tactical reconnaissance notes",
       "radius": 150.0,
       "status": "active",
       "lat": null,
@@ -390,7 +393,7 @@ All endpoints follow the unified Error Response Format defined in **Section 5**:
 
 1. **`location_update`**
    * **Sender:** Field units (`Squad`, `SapperSquad`, `Radar`).
-   * **Trigger:** Sent when GPS position shifts by more than **5 meters** (max rate: 1 update/sec).
+   * **Trigger:** Sent when GPS position shifts by more than **5 meters** (max rate: 1 update/sec), OR periodically every **30 seconds** as a keep-alive telemetry ping if stationary.
    * **Payload:**
      ```json
      {
@@ -399,13 +402,13 @@ All endpoints follow the unified Error Response Format defined in **Section 5**:
        "heading": 90.0
      }
      ```
-   * *Note: Unit ID is derived securely from the authenticated socket session token.*
+   * *Note: Unit ID is derived securely from the authenticated socket session token. `heading` is optional (float `[0.0, 360.0]`, defaults to `0.0`).*
 
 2. **`heartbeat`**
-   * **Trigger:** Sent by client every **30 seconds** to signal active connection.
+   * **Trigger:** Sent by client every **30 seconds** to signal active connection and prevent connection timeouts.
    * **Payload:** `{}` (empty object — user identity is derived from authenticated session).
    * **Server action:** Updates `map_entities.updated_at = CURRENT_TIMESTAMP` for the sending unit.
-   * *Note: If neither `heartbeat` nor `location_update` is received for **60 seconds**, the unit is considered stale and rendered greyed out on tactical maps.*
+   * *Note: If neither `location_update` nor `heartbeat` is received for **60 seconds**, the unit is considered stale and rendered greyed out on tactical maps.*
 
 ### Server ➔ Client Events
 
@@ -418,6 +421,7 @@ All endpoints follow the unified Error Response Format defined in **Section 5**:
        "lat": 32.0853,
        "lon": 34.7818,
        "heading": 90.0,
+       "area": "Center",
        "updated_at": "2026-10-08T16:05:00Z"
      }
      ```
@@ -547,8 +551,8 @@ CREATE TABLE threats (
 -- 5. Audit Log Table (Operational accountability — Phase 1 MVP)
 CREATE TABLE audit_log (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
-    action VARCHAR(50) NOT NULL, -- e.g., 'login_success', 'login_failed', 'threat_created', 'threat_updated', 'user_deactivated'
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL, -- NULL for failed logins with non-existent users
+    action VARCHAR(50) NOT NULL, -- Standard actions: 'login_success', 'login_failed', 'token_refresh', 'logout', 'user_created', 'user_deactivated', 'threat_created', 'threat_updated', 'threat_resolved', 'threat_deactivated'
     resource_type VARCHAR(50),   -- e.g., 'threat', 'user', 'map_entity'
     resource_id UUID,
     details JSONB,               -- Additional context (old/new values, reason, etc.)
@@ -588,3 +592,28 @@ CREATE INDEX idx_audit_action ON audit_log(action, created_at);
 | **Backend WebSocket** | `http://localhost:8000` (path: `/socket.io`) | python-socketio ASGI mount |
 | **Frontend Dev Server** | `http://localhost:5173` | Vite dev server |
 | **Database** | `localhost:5432` | PostgreSQL + PostGIS via Docker Compose |
+
+---
+
+## 8. Dev & Demo Seed Inventory (`backend/app/db/seed.py`)
+
+All development, testing, and UI demo accounts use standardized fixtures:
+
+### Users & Tactical Units
+
+| Username | Default Password | Role | Area | Initial Lat, Lon | Heading | Soldiers |
+|---|---|---|---|---|---|---|
+| `admin` | `admin123` | `MainCommandCenter` | `Global` | `null, null` | `0.0` | `[]` |
+| `command_north` | `command123` | `AreaCommandCenter` | `North` | `33.0000, 35.3000` | `0.0` | `[]` |
+| `command_center` | `command123` | `AreaCommandCenter` | `Center` | `32.1000, 34.8000` | `0.0` | `[]` |
+| `command_south` | `command123` | `AreaCommandCenter` | `South` | `31.2000, 34.7000` | `0.0` | `[]` |
+| `squad_golani` | `squad123` | `Squad` | `Center` | `32.0853, 34.7818` | `90.0` | `1000001` (Rifleman), `1000002` (Medic), `1000003` (Recon) |
+| `squad_paratroopers` | `squad123` | `SapperSquad` | `Center` | `32.0920, 34.7890` | `180.0` | `2000001` (Rifleman), `2000002` (Sapper), `2000003` (Sapper) |
+| `radar_post_1` | `radar123` | `Radar` | `North` | `33.1500, 35.5000` | `45.0` | `[]` |
+
+### Initial Demo Threats
+
+| Name | Type | Threat Type | Severity | Status | Engagement | Lat, Lon | Altitude | Radius |
+|---|---|---|---|---|---|---|---|---|
+| `IED Blockade Route 4` | `immovable` | `explosive` | `high` | `active` | `unassigned` | `32.0800, 34.7800` | `null` | `150.0m` |
+| `Hostile Recon Drone` | `movable` | `drone` | `critical` | `active` | `unassigned` | `33.1800, 35.5200` | `450.0m` | `300.0m` |
