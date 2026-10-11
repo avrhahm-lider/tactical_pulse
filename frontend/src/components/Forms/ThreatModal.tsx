@@ -174,10 +174,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
           {/* Coordinates Inputs */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-mono text-slate-300 mb-1">
+              <label htmlFor="threat-lat" className="block text-[11px] font-mono text-slate-300 mb-1">
                 LATITUDE (29.0° – 34.0°)
               </label>
               <input
+                id="threat-lat"
+                name="lat"
                 type="number"
                 step="0.000001"
                 required
@@ -187,10 +189,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
               />
             </div>
             <div>
-              <label className="block text-[11px] font-mono text-slate-300 mb-1">
+              <label htmlFor="threat-lon" className="block text-[11px] font-mono text-slate-300 mb-1">
                 LONGITUDE (33.5° – 36.5°)
               </label>
               <input
+                id="threat-lon"
+                name="lon"
                 type="number"
                 step="0.000001"
                 required
@@ -204,10 +208,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
           {/* Name & Threat Category */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-mono text-slate-300 mb-1">
+              <label htmlFor="threat-name" className="block text-[11px] font-mono text-slate-300 mb-1">
                 THREAT DESIGNATION / NAME
               </label>
               <input
+                id="threat-name"
+                name="name"
                 type="text"
                 required
                 placeholder="e.g. IED Blockade Route 4"
@@ -218,10 +224,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-slate-300 mb-1">
+              <label htmlFor="threat-category" className="block text-[11px] font-mono text-slate-300 mb-1">
                 CATEGORY (THREAT TYPE)
               </label>
               <select
+                id="threat-category"
+                name="threat_type"
                 value={threatType}
                 onChange={(e) => {
                   const val = e.target.value as ThreatCategory
@@ -245,10 +253,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
           {/* Severity & Danger Radius */}
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-[11px] font-mono text-slate-300 mb-1">
+              <label htmlFor="threat-mobility" className="block text-[11px] font-mono text-slate-300 mb-1">
                 MOBILITY TYPE
               </label>
               <select
+                id="threat-mobility"
+                name="type"
                 value={type}
                 onChange={(e) => setType(e.target.value as ThreatType)}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white font-mono text-xs focus:border-red-500 focus:outline-none"
@@ -259,10 +269,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-slate-300 mb-1">
+              <label htmlFor="threat-severity" className="block text-[11px] font-mono text-slate-300 mb-1">
                 SEVERITY LEVEL
               </label>
               <select
+                id="threat-severity"
+                name="severity_level"
                 value={severityLevel}
                 onChange={(e) => setSeverityLevel(e.target.value as SeverityLevel)}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white font-mono text-xs focus:border-red-500 focus:outline-none"
@@ -275,10 +287,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-slate-300 mb-1">
+              <label htmlFor="threat-radius" className="block text-[11px] font-mono text-slate-300 mb-1">
                 DANGER RADIUS (M)
               </label>
               <input
+                id="threat-radius"
+                name="radius"
                 type="number"
                 min="10"
                 max="5000"
@@ -292,11 +306,13 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
           {/* Altitude for UAV Drone */}
           {threatType === 'drone' && (
             <div>
-              <label className="block text-[11px] font-mono text-cyan-300 mb-1 flex items-center gap-1">
+              <label htmlFor="threat-altitude" className="block text-[11px] font-mono text-cyan-300 mb-1 flex items-center gap-1">
                 <Plane className="w-3.5 h-3.5" />
                 <span>UAV ALTITUDE (METERS AGL)</span>
               </label>
               <input
+                id="threat-altitude"
+                name="altitude"
                 type="number"
                 min="0"
                 placeholder="e.g. 250"
@@ -309,10 +325,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
 
           {/* Description */}
           <div>
-            <label className="block text-[11px] font-mono text-slate-300 mb-1">
+            <label htmlFor="threat-description" className="block text-[11px] font-mono text-slate-300 mb-1">
               TACTICAL INTEL / DESCRIPTION
             </label>
             <textarea
+              id="threat-description"
+              name="description"
               rows={2}
               placeholder="e.g. Visual confirmed: suspicious cylindrical object on road shoulder..."
               value={description}

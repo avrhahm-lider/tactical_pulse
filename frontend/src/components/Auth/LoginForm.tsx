@@ -61,12 +61,18 @@ export const LoginForm: React.FC = () => {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase">
+            <label
+              htmlFor="login-username"
+              className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase"
+            >
               Operator Call-sign / Username
             </label>
             <div className="relative">
               <User className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
               <input
+                id="login-username"
+                name="username"
+                autoComplete="username"
                 type="text"
                 required
                 value={username}
@@ -78,12 +84,18 @@ export const LoginForm: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase">
+            <label
+              htmlFor="login-password"
+              className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase"
+            >
               Authentication Key / Password
             </label>
             <div className="relative">
               <Lock className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
               <input
+                id="login-password"
+                name="password"
+                autoComplete="current-password"
                 type="password"
                 required
                 value={password}
