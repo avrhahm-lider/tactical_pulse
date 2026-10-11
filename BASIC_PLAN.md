@@ -99,16 +99,22 @@ Entity
    * Creates initial dev/demo accounts: `admin` (MainCommandCenter), 3 regional centers (`command_north`, `command_center`, `command_south`), 3 tactical squads with soldiers (`squad_golani`, `squad_paratroopers` with sappers, `radar_post_1`), and 2 demo threats (IED and UAV).
 10. **Tactical Simulator**:
     * Python test script (`simulator/run.py`) to simulate squads moving and streaming coordinates via Socket.IO to validate real-time updates without manual clicks.
+11. **Audit Log**:
+    * Every significant action (login, threat creation/update, status change, user management) is recorded in a dedicated `audit_log` table with user ID, action type, resource, timestamp, and IP address. Provides full operational accountability and forensic traceability.
 
 ---
 
 ### Phase 2: Post-MVP Features (Deferred)
 1. **Navigation & Dynamic Threat Avoidance**:
-   * Route calculation avoiding known threat radiuses (pgRouting + NetworkX).
+   * Route calculation for regular squads avoiding known threat radiuses (pgRouting + NetworkX).
+   * Direct vector navigation for `SapperSquad` to assigned IED threats.
 2. **Command & Tactical Chat**:
    * Secure messaging between Command Centers (`chat_message` / `chat_broadcast`).
+   * Operational broadcast from Command Center to squads (by zone or global).
 3. **High-Frequency Live Cache**:
-   * Redis pub/sub layer for sub-millisecond coordinate streaming.
+   * Redis pub/sub layer for sub-millisecond coordinate streaming if horizontal scaling is required.
+4. **Transport Layer Security (TLS / HTTPS & WSS)**:
+   * Production SSL/TLS encryption for REST and WebSocket traffic via reverse proxy (Nginx / Cloud ALB). Deferred from MVP for simplified local development.
 
 ---
 
@@ -167,6 +173,7 @@ To ensure smooth parallel execution between **Backend Agent** and **Frontend Age
 * **GIS Coordinates Convention**:
   * Client APIs & Leaflet: `lat, lon` (Latitude first).
   * PostGIS Geometry: `ST_MakePoint(lon, lat)` (Longitude first, standard WGS 84 / SRID 4326).
+* **Security**: JWT with refresh token rotation, rate limiting on authentication, bcrypt password hashing, audit logging (TLS/HTTPS deferred to Phase 2).
 * **Testing & Tools**: Pytest, Alembic migrations, Docker Compose.
 * **Ports**:
   * Backend API: `http://localhost:8000/api/v1`

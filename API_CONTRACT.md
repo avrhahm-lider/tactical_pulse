@@ -77,7 +77,9 @@ Standard Error Response Format:
     ```json
     {
       "access_token": "eyJhbGciOi...",
+      "refresh_token": "dGhpcyBpcyBh...",
       "token_type": "bearer",
+      "expires_in": 3600,
       "user": {
         "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
         "username": "command_north",
@@ -88,6 +90,8 @@ Standard Error Response Format:
       }
     }
     ```
+
+> **Rate Limiting:** `POST /auth/login` is rate-limited to 5 attempts per minute per IP/username. After 10 consecutive failed attempts, the account is temporarily locked for 15 minutes.
 
 * **GET `/auth/me`**
   * **Headers:** `Authorization: Bearer <JWT>`
@@ -101,6 +105,31 @@ Standard Error Response Format:
       "area": "North",
       "name": "Northern Command Center",
       "status": "active"
+    }
+    ```
+
+* **POST `/auth/refresh`**
+  * **Request Body:**
+    ```json
+    {
+      "refresh_token": "dGhpcyBpcyBh..."
+    }
+    ```
+  * **Response (200 OK):**
+    ```json
+    {
+      "access_token": "eyJhbGciOi...(new)...",
+      "expires_in": 3600
+    }
+    ```
+
+* **POST `/auth/logout`**
+  * **Headers:** `Authorization: Bearer <JWT>`
+  * **Description:** Invalidates the current access and refresh tokens. Terminates any active WebSocket connections associated with this user.
+  * **Response (200 OK):**
+    ```json
+    {
+      "message": "Logged out successfully"
     }
     ```
 
@@ -195,7 +224,8 @@ Standard Error Response Format:
 
 * **POST `/threats`**
   * **Headers:** `Authorization: Bearer <JWT>`
-  * **Description:** Reported by units or command centers. Coordinates can originate from GPS position or by clicking on the map. Validates RBAC rules, stores to DB, and **broadcasts `threat_created` via WebSocket** to all clients within visible range.
+  * **Description:** Reported by units or command centers. The coordinates (`lat`, `lon`) can originate either from the reporting unit's current GPS position or interactively by clicking a point on the tactical map. Server validates role permissions (RBAC), saves the threat to DB, and **broadcasts `threat_created` via WebSocket** to all clients within visible range.
+  * **Coordinate Validation:** Server enforces geographic bounding box: `lat` must be within `[29.0, 34.0]`, `lon` within `[33.5, 36.5]`, and `altitude` (if provided) must be `>= 0`. Requests with out-of-bounds coordinates are rejected with `422 Unprocessable Entity`.
   * **Request Body:**
     ```json
     {
@@ -234,7 +264,8 @@ Standard Error Response Format:
 
 * **PATCH `/threats/{threat_id}`**
   * **Headers:** `Authorization: Bearer <JWT>`
-  * **Description:** Updates engagement status (`in_progress`, `resolved`), assigned squad, danger radius, coordinates (movable only), or deactivates threat (`status: inactive`). Validates RBAC matrix and **broadcasts `threat_updated` via WebSocket** to authorized clients.
+  * **Description:** Updates engagement status (e.g. `in_progress`, `resolved`), assigned squad, coordinates (movable only), danger radius, or deactivates threat (`status: inactive`). Validates RBAC matrix and **broadcasts `threat_updated` via WebSocket** to authorized clients.
+  * **Concurrency Control:** If `engagement_status` is being changed to `in_progress`, the server verifies the threat is still `unassigned`. If another squad has already taken responsibility, the server returns `409 Conflict` with the details of the currently assigned squad.
   * **Request Body (all fields optional):**
     ```json
     {
@@ -353,6 +384,11 @@ Standard Error Response Format:
      ```
    * *Note: Unit ID is derived securely from the authenticated socket session token.*
 
+2. **`heartbeat`**
+   * **Trigger:** Sent by client every **30 seconds** to signal active connection.
+   * **Payload:** `{}` (empty object — user identity is derived from authenticated session).
+   * *Note: If no `heartbeat` or `location_update` is received for **60 seconds**, the unit is considered stale and rendered greyed out on tactical maps.*
+
 ### Server ➔ Client Events
 
 1. **`squad_moved`**
@@ -384,8 +420,14 @@ Standard Error Response Format:
    * **Payload:** Complete Threat object (matches `POST /threats` 201 response).
 
 4. **`threat_updated`**
-   * **Trigger:** Broadcast when a threat is modified, assigned, moved, or resolved via `PATCH /threats/{id}`.
-   * **Payload:** Complete updated Threat object (matches `PATCH /threats/{id}` 200 response). If `status: "inactive"`, frontend removes the marker.
+   * **Trigger:** Broadcast when a threat is modified, assigned, moved, resolved, or archived (`status: "inactive"`).
+   * **Payload:** Complete updated Threat object (matches `PATCH /threats/{id}` 200 response). If `status: "inactive"`, the client removes the threat marker from the map layer.
+
+### Reconnection Strategy
+> When a WebSocket connection drops, the client must:
+> 1. Attempt automatic reconnection with **exponential backoff** (1s, 2s, 4s, 8s, max 30s).
+> 2. On successful reconnect, immediately call `GET /map/snapshot` to re-sync full tactical state.
+> 3. Re-authenticate via `auth.token` in the Socket.IO handshake (refresh the JWT if expired).
 
 ---
 
@@ -395,7 +437,33 @@ Standard Error Response Format:
 
 ---
 
-## 5. Database Schema (PostgreSQL 15+ & PostGIS)
+## 5. Error Response Format
+
+All API errors follow a consistent structure:
+```json
+{
+  "error": {
+    "code": "THREAT_ALREADY_ASSIGNED",
+    "message": "This threat is already being handled by another squad",
+    "status": 409,
+    "details": {}
+  }
+}
+```
+
+| HTTP Status | Error Code | Description |
+|-------------|-----------|-------------|
+| 400 | `INVALID_REQUEST` | Malformed request body or missing required fields |
+| 401 | `UNAUTHORIZED` | Missing or invalid JWT token |
+| 403 | `FORBIDDEN` | Insufficient role permissions (RBAC violation) |
+| 404 | `NOT_FOUND` | Resource does not exist |
+| 409 | `CONFLICT` | Concurrent modification or duplicate resource |
+| 422 | `VALIDATION_ERROR` | Coordinates out of bounds or invalid field values |
+| 429 | `RATE_LIMITED` | Too many requests (login brute-force protection) |
+
+---
+
+## 6. Database Schema (PostgreSQL 15+ & PostGIS)
 
 ```sql
 -- Extensions
@@ -417,15 +485,15 @@ CREATE TABLE users (
 
 -- 2. Soldiers Table (7-digit IDs, flexible tactical roles)
 CREATE TABLE soldiers (
-    id VARCHAR(7) PRIMARY KEY, -- exactly 7 digits
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    id VARCHAR(7) PRIMARY KEY CHECK (id ~ '^\d{7}$'), -- exactly 7 digits, enforced
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     name VARCHAR(100) NOT NULL,
     role VARCHAR(50) DEFAULT 'rifleman' -- e.g., 'sapper', 'medic', 'rifleman', 'recon'
 );
 
 -- 3. Live Entity Locations & State (Map Entities)
 CREATE TABLE map_entities (
-    id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,
     geom GEOMETRY(Point, 4326) NOT NULL, -- PostGIS coordinates (SRID 4326: lon/lat)
     heading FLOAT DEFAULT 0.0 CHECK (heading >= 0.0 AND heading <= 360.0),
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
@@ -441,21 +509,36 @@ CREATE TABLE threats (
     threat_type VARCHAR(50) NOT NULL CHECK (threat_type IN ('explosive', 'vehicle', 'drone', 'personnel')),
     severity_level VARCHAR(20) NOT NULL CHECK (severity_level IN ('low', 'medium', 'high', 'critical')),
     engagement_status VARCHAR(30) DEFAULT 'unassigned' CHECK (engagement_status IN ('unassigned', 'in_progress', 'resolved')),
-    assigned_to_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    assigned_to_id UUID REFERENCES users(id) ON DELETE RESTRICT,
     geom GEOMETRY(Point, 4326) NOT NULL,
     altitude FLOAT DEFAULT NULL, -- Altitude in meters (drone threats)
     radius FLOAT DEFAULT 150.0,  -- Danger radius buffer in meters
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-    created_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_by_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+    CONSTRAINT valid_lifecycle CHECK (
+        NOT (status = 'inactive' AND engagement_status = 'in_progress')
+    ),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. Chat History Table (Phase 2 - Post-MVP)
+-- 5. Audit Log Table (Operational accountability — Phase 1 MVP)
+CREATE TABLE audit_log (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE RESTRICT,
+    action VARCHAR(50) NOT NULL, -- e.g., 'login_success', 'login_failed', 'threat_created', 'threat_updated', 'user_deactivated'
+    resource_type VARCHAR(50),   -- e.g., 'threat', 'user', 'map_entity'
+    resource_id UUID,
+    details JSONB,               -- Additional context (old/new values, reason, etc.)
+    ip_address INET,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Chat History Table (Phase 2 - Post-MVP)
 CREATE TABLE messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    sender_id UUID NOT NULL REFERENCES users(id),
-    recipient_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    sender_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    recipient_id UUID REFERENCES users(id) ON DELETE SET NULL, -- NULL for broadcast
     text TEXT NOT NULL,
     timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -463,11 +546,19 @@ CREATE TABLE messages (
 -- Spatial Indexes
 CREATE INDEX idx_map_entities_geom ON map_entities USING GIST (geom);
 CREATE INDEX idx_threats_geom ON threats USING GIST (geom);
+
+-- Query Performance & Audit Indexes
+CREATE INDEX idx_users_role_area_status ON users(role, area, status);
+CREATE INDEX idx_threats_status ON threats(status, engagement_status);
+CREATE INDEX idx_threats_assigned ON threats(assigned_to_id);
+CREATE INDEX idx_soldiers_user ON soldiers(user_id);
+CREATE INDEX idx_audit_user ON audit_log(user_id);
+CREATE INDEX idx_audit_action ON audit_log(action, created_at);
 ```
 
 ---
 
-## 6. Ports, Network & Integration Conventions
+## 7. Ports, Network & Integration Conventions
 
 | Service | Host & Port | Notes |
 |---|---|---|
