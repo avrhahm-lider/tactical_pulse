@@ -1,6 +1,7 @@
 import React from 'react'
-import { AlertOctagon, AlertTriangle, X, Crosshair, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, X, Crosshair, ShieldAlert } from 'lucide-react'
 import { useMapStore } from '../../store/useMapStore'
+import { useAuthStore } from '../../store/useAuthStore'
 
 export const ProximityAlertBanner: React.FC = () => {
   const {
@@ -11,12 +12,19 @@ export const ProximityAlertBanner: React.FC = () => {
     setSelectedEntity,
   } = useMapStore()
 
-  if (proximityAlerts.length === 0 && dangerZoneAlerts.length === 0) return null
+  const { user } = useAuthStore()
+
+  // Only show danger zone alerts to the specific squad that entered the danger zone!
+  const relevantDangerAlerts = dangerZoneAlerts.filter(
+    (alert) => user && alert.squad_id === user.id
+  )
+
+  if (proximityAlerts.length === 0 && relevantDangerAlerts.length === 0) return null
 
   return (
     <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[1100] w-full max-w-xl px-4 space-y-2 pointer-events-none">
       {/* 1. Critical Danger Zone Intrusion Alerts (Squad inside Drone / Threat radius) */}
-      {dangerZoneAlerts.map((alert) => (
+      {relevantDangerAlerts.map((alert) => (
         <div
           key={alert.id}
           className="pointer-events-auto p-3.5 rounded-lg bg-red-950/95 border-2 border-red-500 shadow-2xl hud-glow-red flex items-center justify-between animate-bounce"

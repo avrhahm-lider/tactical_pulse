@@ -163,6 +163,10 @@ async def simulate_single_unit(username: str, password: str, steps: int = 0, del
     async def on_danger_alert(data):
         print(f"\n🚨🚨🚨 [{username.upper()} HAZARD ALERT] {data.get('message')} 🚨🚨🚨\n")
 
+    @sio.on("danger_zone_cleared")
+    async def on_danger_cleared(data):
+        print(f"🛡️ [{username.upper()}] Clear of danger perimeter for threat {data.get('threat_id')[:8]}...")
+
     try:
         await sio.connect(
             BASE_SOCKET_URL,
@@ -195,10 +199,12 @@ async def simulate_single_unit(username: str, password: str, steps: int = 0, del
             if step % 5 == 0 or step == 1:
                 print(f"[{username}] Step #{step} -> Lat: {curr_lat:.5f}, Lon: {curr_lon:.5f}, Heading: {heading:5.1f}°")
 
-            await sio.emit("location_update", payload)
-
-            if step % 20 == 0:
-                await sio.emit("heartbeat", {})
+            try:
+                await sio.emit("location_update", payload)
+                if step % 20 == 0:
+                    await sio.emit("heartbeat", {})
+            except Exception:
+                pass
 
             await asyncio.sleep(delay)
 

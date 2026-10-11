@@ -58,6 +58,10 @@ export function connectSocket(token: string, currentUserId?: string): Socket {
     useMapStore.getState().addDangerZoneAlert(payload)
   })
 
+  socket.on('danger_zone_cleared', (payload: { id: string }) => {
+    useMapStore.getState().dismissDangerZoneAlert(payload.id)
+  })
+
   socket.on('unit_status_changed', (payload: UnitStatusChangedPayload) => {
     if (payload.status === 'inactive') {
       useMapStore.getState().removeSquad(payload.id)
