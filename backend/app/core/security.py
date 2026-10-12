@@ -1,8 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any
+
 import bcrypt
 import jwt
+
 from app.core.config import settings
 
 
@@ -21,8 +23,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def create_access_token(subject: str, extra_claims: Optional[Dict[str, Any]] = None) -> str:
-    now = datetime.now(timezone.utc)
+def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None) -> str:
+    now = datetime.now(UTC)
     expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode = {
         "sub": str(subject),
@@ -36,7 +38,7 @@ def create_access_token(subject: str, extra_claims: Optional[Dict[str, Any]] = N
 
 
 def create_refresh_token(subject: str) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode = {
         "sub": str(subject),
@@ -47,5 +49,5 @@ def create_refresh_token(subject: str) -> str:
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def decode_token(token: str) -> Dict[str, Any]:
+def decode_token(token: str) -> dict[str, Any]:
     return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])

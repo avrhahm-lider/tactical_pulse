@@ -1,17 +1,17 @@
-from typing import Optional, Tuple
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, cast
-from geoalchemy2 import Geography
-from geoalchemy2.functions import ST_DWithin, ST_Y, ST_X, ST_MakePoint, ST_SetSRID
 
-from app.models.user import User
+from geoalchemy2 import Geography
+from geoalchemy2.functions import ST_X, ST_Y, ST_DWithin, ST_MakePoint, ST_SetSRID
+from sqlalchemy import and_, cast, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
 from app.models.map_entity import MapEntity
 from app.models.threat import Threat
-from app.core.config import settings
+from app.models.user import User
 
 
-async def get_caller_coordinates(session: AsyncSession, user_id: UUID) -> Optional[Tuple[float, float]]:
+async def get_caller_coordinates(session: AsyncSession, user_id: UUID) -> tuple[float, float] | None:
     """Returns (lat, lon) for caller's MapEntity if caller is a tactical field unit."""
     stmt = select(ST_Y(MapEntity.geom).label("lat"), ST_X(MapEntity.geom).label("lon")).where(
         and_(MapEntity.id == user_id, MapEntity.status == "active")
@@ -51,7 +51,7 @@ def get_zone_clause_for_geom(geom_column, area: str):
     return None
 
 
-def get_visible_squads_query(caller: User, caller_coords: Optional[Tuple[float, float]]):
+def get_visible_squads_query(caller: User, caller_coords: tuple[float, float] | None):
     """
     Builds SQL query for active squads visible to caller:
     - MainCommandCenter: all active field units
@@ -108,8 +108,8 @@ def get_visible_squads_query(caller: User, caller_coords: Optional[Tuple[float, 
 
 def get_visible_threats_query(
     caller: User,
-    caller_coords: Optional[Tuple[float, float]],
-    status_filter: Optional[str] = "active",
+    caller_coords: tuple[float, float] | None,
+    status_filter: str | None = "active",
 ):
     """
     Builds SQL query for threats visible to caller:

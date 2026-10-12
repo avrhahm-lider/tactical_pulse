@@ -1,33 +1,33 @@
-from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
-from geoalchemy2.functions import ST_X, ST_Y
-from geoalchemy2.elements import WKTElement
 
+from fastapi import APIRouter, Depends, Request, status
+from geoalchemy2.elements import WKTElement
+from geoalchemy2.functions import ST_X, ST_Y
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.dependencies import require_main_command
+from app.core.errors import AppException
+from app.core.security import hash_password
 from app.db.postgres import get_db
-from app.models.user import User
-from app.models.soldier import Soldier
 from app.models.map_entity import MapEntity
-from app.schemas.user import (
-    UserCreate,
-    UserUpdate,
-    UserStatusUpdate,
-    AdminUserResponse,
-    UserResponse,
-)
+from app.models.soldier import Soldier
+from app.models.user import User
+from app.schemas.auth import MessageResponse
 from app.schemas.soldier import (
     SoldierCreate,
-    SoldierUpdate,
     SoldierResponse,
+    SoldierUpdate,
 )
-from app.schemas.auth import MessageResponse
-from app.core.security import hash_password
-from app.core.errors import AppException
+from app.schemas.user import (
+    AdminUserResponse,
+    UserCreate,
+    UserResponse,
+    UserStatusUpdate,
+    UserUpdate,
+)
 from app.services.audit import log_audit_event
 from app.services.spatial import calculate_area_from_lat
-from app.api.dependencies import require_main_command
 from app.sockets.server import broadcast_unit_status_changed
 
 router = APIRouter(prefix="/admin", tags=["Administration"])
@@ -37,9 +37,9 @@ router = APIRouter(prefix="/admin", tags=["Administration"])
 # SOLDIERS MANAGEMENT
 # =========================================================================
 
-@router.get("/soldiers", response_model=List[SoldierResponse])
+@router.get("/soldiers", response_model=list[SoldierResponse])
 async def list_soldiers(
-    squad_id: Optional[UUID] = None,
+    squad_id: UUID | None = None,
     session: AsyncSession = Depends(get_db),
     current_admin: User = Depends(require_main_command),
 ):
@@ -193,7 +193,7 @@ async def delete_soldier(
 # USERS MANAGEMENT
 # =========================================================================
 
-def _mask_confidential_coords(role: str, lat: Optional[float], lon: Optional[float]) -> tuple[Optional[float], Optional[float]]:
+def _mask_confidential_coords(role: str, lat: float | None, lon: float | None) -> tuple[float | None, float | None]:
     if role in ("Radar", "AreaCommandCenter", "MainCommandCenter"):
         return None, None
     return lat, lon
@@ -201,9 +201,9 @@ def _mask_confidential_coords(role: str, lat: Optional[float], lon: Optional[flo
 
 def _build_admin_user_response(
     u: User,
-    lat: Optional[float] = None,
-    lon: Optional[float] = None,
-    soldiers: Optional[list] = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    soldiers: list | None = None,
 ) -> AdminUserResponse:
     m_lat, m_lon = _mask_confidential_coords(u.role, lat, lon)
     roster = soldiers if soldiers is not None else u.soldiers
@@ -226,7 +226,7 @@ def _build_admin_user_response(
     )
 
 
-@router.get("/users", response_model=List[AdminUserResponse])
+@router.get("/users", response_model=list[AdminUserResponse])
 async def list_all_users(
     session: AsyncSession = Depends(get_db),
     current_admin: User = Depends(require_main_command),

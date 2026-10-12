@@ -1,7 +1,9 @@
-from typing import Optional, List, Literal
-from uuid import UUID
 from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
 from pydantic import BaseModel, Field
+
 from app.schemas.soldier import SoldierCreate, SoldierResponse
 
 UserRole = Literal["MainCommandCenter", "AreaCommandCenter", "Squad", "SapperSquad", "Radar"]
@@ -13,27 +15,27 @@ class UserBase(BaseModel):
     username: str = Field(..., min_length=3, max_length=100)
     role: UserRole
     name: str = Field(..., min_length=2, max_length=150)
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=6)
-    soldier_id: Optional[str] = Field(None, pattern=r"^\d{7}$", description="7-digit military ID of the soldier")
-    area: Optional[UserArea] = None
-    lat: Optional[float] = Field(None, ge=29.0, le=34.0)
-    lon: Optional[float] = Field(None, ge=33.5, le=36.5)
-    soldiers: Optional[List[SoldierCreate]] = None
+    soldier_id: str | None = Field(None, pattern=r"^\d{7}$", description="7-digit military ID of the soldier")
+    area: UserArea | None = None
+    lat: float | None = Field(None, ge=29.0, le=34.0)
+    lon: float | None = Field(None, ge=33.5, le=36.5)
+    soldiers: list[SoldierCreate] | None = None
 
 
 class UserUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=2, max_length=150)
-    description: Optional[str] = None
-    role: Optional[UserRole] = None
-    area: Optional[UserArea] = None
-    soldier_id: Optional[str] = Field(None, pattern=r"^\d{7}$")
-    password: Optional[str] = Field(None, min_length=6)
-    lat: Optional[float] = Field(None, ge=29.0, le=34.0)
-    lon: Optional[float] = Field(None, ge=33.5, le=36.5)
+    name: str | None = Field(None, min_length=2, max_length=150)
+    description: str | None = None
+    role: UserRole | None = None
+    area: UserArea | None = None
+    soldier_id: str | None = Field(None, pattern=r"^\d{7}$")
+    password: str | None = Field(None, min_length=6)
+    lat: float | None = Field(None, ge=29.0, le=34.0)
+    lon: float | None = Field(None, ge=33.5, le=36.5)
 
 
 class UserStatusUpdate(BaseModel):
@@ -46,20 +48,20 @@ class UserResponse(BaseModel):
     role: UserRole
     area: UserArea
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     status: UserStatus
-    soldier_id: Optional[str] = None
+    soldier_id: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class AdminUserResponse(UserResponse):
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    soldiers: List[SoldierResponse] = []
-    soldier: Optional[SoldierResponse] = None
+    lat: float | None = None
+    lon: float | None = None
+    soldiers: list[SoldierResponse] = []
+    soldier: SoldierResponse | None = None
     is_logged_in: bool = False
-    last_activity_at: Optional[datetime] = None
+    last_activity_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

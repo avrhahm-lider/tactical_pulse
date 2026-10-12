@@ -1,24 +1,25 @@
 import asyncio
 import math
-from datetime import datetime, timezone
-from typing import Dict, Any, List
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
-from sqlalchemy import select
+
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
+from sqlalchemy import select
 
-from app.db.postgres import async_session_maker
 from app.core.security import hash_password
-from app.models.user import User
-from app.models.soldier import Soldier
+from app.db.postgres import async_session_maker
 from app.models.map_entity import MapEntity
+from app.models.soldier import Soldier
 from app.models.threat import Threat
+from app.models.user import User
 from app.schemas.threat import ThreatResponse
 from app.services.spatial import calculate_area_from_lat
 from app.sockets.server import (
-    broadcast_to_visibility_range,
-    broadcast_threat_event,
     _ensure_threats_cache_loaded,
+    broadcast_threat_event,
+    broadcast_to_visibility_range,
 )
 
 # ==============================================================================
@@ -127,53 +128,31 @@ SQUAD_CONFIGS = [
 ]
 
 
-def interpolate_route_2d(key_points: list, step_meters: float = 1.0) -> list:
-    """
-    Subdivides waypoints into smooth micro-steps (e.g. 1.0 meter steps)
-    to completely eliminate jumping across the tactical map.
-    """
-    dense_path = []
-    num_pts = len(key_points)
-    for i in range(num_pts):
-        lat1, lon1 = key_points[i]
-        lat2, lon2 = key_points[(i + 1) % num_pts]
+def interpolate_route(key_points: list, step_meters: float = 1.0) -> list:
+    """Subdivides 2D or 3D waypoints into smooth micro-steps to eliminate jumping."""
+    dense = []
+    n = len(key_points)
+    for i in range(n):
+        p1, p2 = key_points[i], key_points[(i + 1) % n]
+        d_lat_m = (p2[0] - p1[0]) * 111320.0
+        d_lon_m = (p2[1] - p1[1]) * 111320.0 * math.cos(math.radians((p1[0] + p2[0]) / 2))
+        dist_m = math.hypot(d_lat_m, d_lon_m)
+        steps = max(1, int(dist_m / step_meters))
+        has_alt = len(p1) > 2
+        for s in range(steps):
+            t = s / steps
+            lat = round(p1[0] + (p2[0] - p1[0]) * t, 6)
+            lon = round(p1[1] + (p2[1] - p1[1]) * t, 6)
+            if has_alt:
+                alt = round(p1[2] + (p2[2] - p1[2]) * t, 1)
+                dense.append((lat, lon, alt))
+            else:
+                dense.append((lat, lon))
+    return dense
 
-        d_lat_m = (lat2 - lat1) * 111320.0
-        d_lon_m = (lon2 - lon1) * 111320.0 * math.cos(math.radians((lat1 + lat2) / 2))
-        segment_dist_m = math.sqrt(d_lat_m**2 + d_lon_m**2)
 
-        sub_steps = max(1, int(segment_dist_m / step_meters))
-        for s in range(sub_steps):
-            t = s / sub_steps
-            lat = lat1 + (lat2 - lat1) * t
-            lon = lon1 + (lon2 - lon1) * t
-            dense_path.append((round(lat, 6), round(lon, 6)))
-    return dense_path
-
-
-def interpolate_route_3d(key_points: list, step_meters: float = 5.5) -> list:
-    """
-    Interpolates 3D coordinates (lat, lon, altitude) for high-speed,
-    silky-smooth UAV drone flight.
-    """
-    dense_path = []
-    num_pts = len(key_points)
-    for i in range(num_pts):
-        lat1, lon1, alt1 = key_points[i]
-        lat2, lon2, alt2 = key_points[(i + 1) % num_pts]
-
-        d_lat_m = (lat2 - lat1) * 111320.0
-        d_lon_m = (lon2 - lon1) * 111320.0 * math.cos(math.radians((lat1 + lat2) / 2))
-        segment_dist_m = math.sqrt(d_lat_m**2 + d_lon_m**2)
-
-        sub_steps = max(1, int(segment_dist_m / step_meters))
-        for s in range(sub_steps):
-            t = s / sub_steps
-            lat = lat1 + (lat2 - lat1) * t
-            lon = lon1 + (lon2 - lon1) * t
-            alt = alt1 + (alt2 - alt1) * t
-            dense_path.append((round(lat, 6), round(lon, 6), round(alt, 1)))
-    return dense_path
+interpolate_route_2d = interpolate_route
+interpolate_route_3d = interpolate_route
 
 
 def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -192,8 +171,8 @@ def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
 
 class SimulatorEngine:
     def __init__(self):
-        self._tasks: Dict[str, asyncio.Task] = {}
-        self._step_indices: Dict[str, int] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._step_indices: dict[str, int] = {}
         self._is_running = False
         self._current_mode = "stopped"
 
@@ -205,7 +184,7 @@ class SimulatorEngine:
     def mode(self) -> str:
         return self._current_mode
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         return {
             "is_running": self._is_running,
             "mode": self._current_mode,
@@ -224,7 +203,7 @@ class SimulatorEngine:
         """
         Pushes real-time squad telemetry via WebSockets and checks for threat breaches.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         area = calculate_area_from_lat(lat)
 
         # 1. Emit squad_moved event
@@ -245,7 +224,10 @@ class SimulatorEngine:
         )
 
         # 2. Check danger perimeter breaches for connected client of this squad
-        from app.sockets.server import _connected_clients, check_and_broadcast_danger_alerts
+        from app.sockets.server import (
+            _connected_clients,
+            check_and_broadcast_danger_alerts,
+        )
         for sid, client in list(_connected_clients.items()):
             if client.get("user_id") == squad_id:
                 client["lat"] = lat
@@ -300,7 +282,7 @@ class SimulatorEngine:
         """
         Pushes real-time UAV aerial telemetry and tests proximity danger checks.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "id": str(threat_id),
             "name": name,
@@ -376,7 +358,7 @@ class SimulatorEngine:
         except asyncio.CancelledError:
             pass
 
-    async def start(self, mode: str = "all") -> Dict[str, Any]:
+    async def start(self, mode: str = "all") -> dict[str, Any]:
         """
         Launches full tactical simulation.
         Automatically provisions:
@@ -555,7 +537,7 @@ class SimulatorEngine:
 
         return self.get_status()
 
-    async def stop(self) -> Dict[str, Any]:
+    async def stop(self) -> dict[str, Any]:
         """
         Gracefully stops all simulation tasks.
         """
@@ -574,7 +556,7 @@ class SimulatorEngine:
         target_id: UUID,
         direction: str,
         delta: float = 0.0005,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Manual step for nudging a single squad or drone (e.g. from telemetry D-Pad).
         """

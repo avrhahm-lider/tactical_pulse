@@ -1,11 +1,13 @@
 import ipaddress
-from typing import Optional, Dict, Any
+from typing import Any
 from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.audit_log import AuditLog
 
 
-def sanitize_ip(ip: Optional[str]) -> Optional[str]:
+def sanitize_ip(ip: str | None) -> str | None:
     if not ip:
         return None
     try:
@@ -18,11 +20,11 @@ def sanitize_ip(ip: Optional[str]) -> Optional[str]:
 async def log_audit_event(
     session: AsyncSession,
     action: str,
-    user_id: Optional[UUID] = None,
-    resource_type: Optional[str] = None,
-    resource_id: Optional[UUID] = None,
-    details: Optional[Dict[str, Any]] = None,
-    ip_address: Optional[str] = None,
+    user_id: UUID | None = None,
+    resource_type: str | None = None,
+    resource_id: UUID | None = None,
+    details: dict[str, Any] | None = None,
+    ip_address: str | None = None,
 ) -> AuditLog:
     entry = AuditLog(
         user_id=user_id,

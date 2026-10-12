@@ -1,9 +1,12 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
-import socketio
 
+import socketio
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api import admin, auth, simulator, threats
+from app.api import map as tactical_map
 from app.core.config import settings
 from app.core.errors import (
     AppException,
@@ -12,7 +15,6 @@ from app.core.errors import (
     validation_exception_handler,
 )
 from app.db.postgres import init_db
-from app.api import auth, admin, threats, map as tactical_map, simulator
 from app.sockets.server import sio
 
 

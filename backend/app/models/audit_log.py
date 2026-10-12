@@ -1,8 +1,10 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
+from datetime import UTC, datetime
+
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import relationship
+
 from app.db.postgres import Base
 
 
@@ -22,7 +24,7 @@ class AuditLog(Base):
     ip_address = Column(INET, nullable=True)
     created_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
 

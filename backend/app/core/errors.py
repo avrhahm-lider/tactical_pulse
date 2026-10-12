@@ -1,7 +1,8 @@
-from fastapi import Request, HTTPException, status
-from fastapi.responses import JSONResponse
+from typing import Any
+
+from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
-from typing import Any, Dict, Optional
+from fastapi.responses import JSONResponse
 
 
 class AppException(HTTPException):
@@ -10,7 +11,7 @@ class AppException(HTTPException):
         status_code: int,
         code: str,
         message: str,
-        details: Optional[Dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(status_code=status_code, detail=message)
         self.code = code
@@ -18,7 +19,7 @@ class AppException(HTTPException):
         self.details = details or {}
 
 
-def create_error_response(status_code: int, code: str, message: str, details: Optional[Dict[str, Any]] = None) -> JSONResponse:
+def create_error_response(status_code: int, code: str, message: str, details: dict[str, Any] | None = None) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={

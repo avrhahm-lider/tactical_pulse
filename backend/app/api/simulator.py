@@ -1,10 +1,11 @@
-from typing import Optional, Literal
+from typing import Literal
 from uuid import UUID
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.models.user import User
 from app.api.dependencies import require_main_command
+from app.models.user import User
 from app.simulator.engine import simulator_engine
 
 router = APIRouter(prefix="/admin/simulator", tags=["Tactical Simulator"])
@@ -18,7 +19,7 @@ class SimulatorStepRequest(BaseModel):
     target_type: Literal["squad", "drone"]
     target_id: UUID
     direction: Literal["up", "down", "left", "right", "alt_up", "alt_down"]
-    delta: Optional[float] = Field(0.0005, ge=0.00001, le=0.01)
+    delta: float | None = Field(0.0005, ge=0.00001, le=0.01)
 
 
 @router.get("/status")

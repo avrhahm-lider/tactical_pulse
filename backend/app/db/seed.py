@@ -1,20 +1,21 @@
 import asyncio
 import os
 import sys
-from sqlalchemy import delete
+
 from geoalchemy2.elements import WKTElement
+from sqlalchemy import delete
 
 # Ensure backend root is on sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from app.db.postgres import async_session_maker, init_db
 from app.core.security import hash_password
-from app.models.user import User
-from app.models.soldier import Soldier
-from app.models.map_entity import MapEntity
-from app.models.threat import Threat
+from app.db.postgres import async_session_maker, init_db
 from app.models.audit_log import AuditLog
+from app.models.map_entity import MapEntity
 from app.models.message import Message
+from app.models.soldier import Soldier
+from app.models.threat import Threat
+from app.models.user import User
 
 
 async def seed_database() -> None:

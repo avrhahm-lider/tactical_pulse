@@ -1,6 +1,7 @@
+from typing import Any
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Any
 
 
 class Settings(BaseSettings):
@@ -26,10 +27,10 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     @field_validator("CORS_ORIGINS", mode="before")
-    def assemble_cors_origins(cls, v: Any) -> List[str]:
+    def assemble_cors_origins(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             if v.strip().startswith("[") and v.strip().endswith("]"):
                 import json

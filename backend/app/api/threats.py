@@ -1,31 +1,35 @@
-from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, cast
-from geoalchemy2 import Geography
-from geoalchemy2.functions import ST_X, ST_Y, ST_DWithin, ST_MakePoint, ST_SetSRID
-from geoalchemy2.elements import WKTElement
 
-from app.db.postgres import get_db
-from app.models.user import User
-from app.models.threat import Threat
-from app.schemas.threat import ThreatCreate, ThreatUpdate, ThreatResponse
-from app.core.errors import AppException
-from app.core.config import settings
-from app.services.audit import log_audit_event
-from app.services.spatial import get_caller_coordinates, get_visible_threats_query, is_lat_in_area
+from fastapi import APIRouter, Depends, Request, status
+from geoalchemy2 import Geography
+from geoalchemy2.elements import WKTElement
+from geoalchemy2.functions import ST_X, ST_Y, ST_DWithin, ST_MakePoint, ST_SetSRID
+from sqlalchemy import cast, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.dependencies import get_current_user
+from app.core.config import settings
+from app.core.errors import AppException
+from app.db.postgres import get_db
+from app.models.threat import Threat
+from app.models.user import User
+from app.schemas.threat import ThreatCreate, ThreatResponse, ThreatUpdate
+from app.services.audit import log_audit_event
+from app.services.spatial import (
+    get_caller_coordinates,
+    get_visible_threats_query,
+    is_lat_in_area,
+)
 from app.sockets.server import broadcast_threat_event
 
 router = APIRouter(prefix="/threats", tags=["Threats Management"])
 
 
-@router.get("", response_model=List[ThreatResponse])
+@router.get("", response_model=list[ThreatResponse])
 async def list_threats(
-    status_filter: Optional[str] = "active",
-    engagement_status: Optional[str] = None,
-    threat_type: Optional[str] = None,
+    status_filter: str | None = "active",
+    engagement_status: str | None = None,
+    threat_type: str | None = None,
     session: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

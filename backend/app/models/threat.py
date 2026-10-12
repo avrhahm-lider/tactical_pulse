@@ -1,9 +1,20 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import Column, String, Text, Float, DateTime, ForeignKey, CheckConstraint, Index
+from datetime import UTC, datetime
+
+from geoalchemy2 import Geometry
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from geoalchemy2 import Geometry
+
 from app.db.postgres import Base
 
 
@@ -38,13 +49,13 @@ class Threat(Base):
     )
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
     created_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
 

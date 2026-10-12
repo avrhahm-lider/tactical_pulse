@@ -1,31 +1,31 @@
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, Tuple
+from datetime import UTC, datetime
 from uuid import UUID
-from fastapi import APIRouter, Depends, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
 
+from fastapi import APIRouter, Depends, Request, status
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.dependencies import get_current_user
+from app.core.errors import AppException
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    verify_password,
+)
 from app.db.postgres import get_db
 from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
-    TokenResponse,
-    RefreshTokenRequest,
-    RefreshResponse,
     MessageResponse,
+    RefreshResponse,
+    RefreshTokenRequest,
+    TokenResponse,
 )
 from app.schemas.user import UserResponse
-from app.core.security import (
-    verify_password,
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-)
-from app.core.errors import AppException
 from app.services.audit import log_audit_event
-from app.api.dependencies import get_current_user
 from app.sockets.server import disconnect_user_sockets
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -35,7 +35,7 @@ def _user_claims(u: User) -> dict:
 
 
 # key: (username, ip) -> (failure_count, last_attempt_time, locked_until_time)
-_login_attempts: Dict[Tuple[str, str], Tuple[int, float, float]] = {}
+_login_attempts: dict[tuple[str, str], tuple[int, float, float]] = {}
 
 
 def check_rate_limit(username: str, client_ip: str) -> None:
@@ -125,7 +125,7 @@ async def login(
         )
 
     # Check concurrent active session within 10 minutes (600 seconds)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if user.is_logged_in and user.last_activity_at:
         idle_seconds = (now - user.last_activity_at).total_seconds()
         if idle_seconds < 600.0:

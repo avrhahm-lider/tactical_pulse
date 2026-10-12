@@ -1,6 +1,7 @@
-from typing import Optional, Literal
-from uuid import UUID
 from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
 from pydantic import BaseModel, Field, model_validator
 
 ThreatType = Literal["movable", "immovable"]
@@ -12,17 +13,17 @@ ThreatStatus = Literal["active", "inactive"]
 
 class ThreatBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=150)
-    description: Optional[str] = None
+    description: str | None = None
     threat_type: ThreatCategory
     severity_level: ThreatSeverity
     radius: float = Field(default=150.0, ge=10.0, le=5000.0)
 
 
 class ThreatCreate(ThreatBase):
-    type: Optional[ThreatType] = None
+    type: ThreatType | None = None
     lat: float = Field(..., ge=29.0, le=34.0)
     lon: float = Field(..., ge=33.5, le=36.5)
-    altitude: Optional[float] = Field(None, ge=0.0)
+    altitude: float | None = Field(None, ge=0.0)
 
     @model_validator(mode="after")
     def validate_type_consistency(self):
@@ -39,33 +40,33 @@ class ThreatCreate(ThreatBase):
 
 
 class ThreatUpdate(BaseModel):
-    engagement_status: Optional[ThreatEngagement] = None
-    assigned_to_id: Optional[UUID] = None
-    severity_level: Optional[ThreatSeverity] = None
-    description: Optional[str] = None
-    radius: Optional[float] = Field(None, ge=10.0, le=5000.0)
-    status: Optional[ThreatStatus] = None
-    lat: Optional[float] = Field(None, ge=29.0, le=34.0)
-    lon: Optional[float] = Field(None, ge=33.5, le=36.5)
-    altitude: Optional[float] = Field(None, ge=0.0)
+    engagement_status: ThreatEngagement | None = None
+    assigned_to_id: UUID | None = None
+    severity_level: ThreatSeverity | None = None
+    description: str | None = None
+    radius: float | None = Field(None, ge=10.0, le=5000.0)
+    status: ThreatStatus | None = None
+    lat: float | None = Field(None, ge=29.0, le=34.0)
+    lon: float | None = Field(None, ge=33.5, le=36.5)
+    altitude: float | None = Field(None, ge=0.0)
 
 
 class ThreatResponse(ThreatBase):
     id: UUID
     type: ThreatType
     engagement_status: ThreatEngagement
-    assigned_to_id: Optional[UUID] = None
+    assigned_to_id: UUID | None = None
     radius: float
     lat: float
     lon: float
-    altitude: Optional[float] = None
+    altitude: float | None = None
     status: ThreatStatus
     created_by_id: UUID
-    created_by_soldier_id: Optional[str] = None
-    created_by_soldier_name: Optional[str] = None
-    created_by_unit_name: Optional[str] = None
+    created_by_soldier_id: str | None = None
+    created_by_soldier_name: str | None = None
+    created_by_unit_name: str | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     model_config = {"from_attributes": True}
 
     @classmethod

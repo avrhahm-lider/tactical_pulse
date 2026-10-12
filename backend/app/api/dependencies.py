@@ -1,15 +1,15 @@
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime
 from uuid import UUID
-from fastapi import Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
+from fastapi import Depends, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import AppException
+from app.core.security import decode_token
 from app.db.postgres import get_db
 from app.models.user import User
-from app.core.security import decode_token
-from app.core.errors import AppException
 
 security_bearer = HTTPBearer(auto_error=True)
 
@@ -52,14 +52,14 @@ async def get_current_user(
         )
 
     # Touch last_activity_at for rolling inactivity tracking
-    user.last_activity_at = datetime.now(timezone.utc)
+    user.last_activity_at = datetime.now(UTC)
     await session.commit()
 
     return user
 
 
 class RoleChecker:
-    def __init__(self, allowed_roles: List[str]):
+    def __init__(self, allowed_roles: list[str]):
         self.allowed_roles = allowed_roles
 
     def __call__(self, user: User = Depends(get_current_user)) -> User:

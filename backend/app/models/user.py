@@ -1,8 +1,18 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import Column, String, Text, DateTime, Boolean, ForeignKey, CheckConstraint
+from datetime import UTC, datetime
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+
 from app.db.postgres import Base
 
 
@@ -29,7 +39,7 @@ class User(Base):
     session_id = Column(String(64), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
 

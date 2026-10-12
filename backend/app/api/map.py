@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import get_current_user
 from app.db.postgres import get_db
 from app.models.user import User
 from app.schemas.map import MapSnapshotResponse, SquadSnapshotItem
@@ -10,7 +11,6 @@ from app.services.spatial import (
     get_visible_squads_query,
     get_visible_threats_query,
 )
-from app.api.dependencies import get_current_user
 
 router = APIRouter(prefix="/map", tags=["Tactical Map"])
 

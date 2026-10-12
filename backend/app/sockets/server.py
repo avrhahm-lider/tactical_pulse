@@ -1,19 +1,20 @@
 import asyncio
 import math
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
+
 import socketio
-from sqlalchemy import select
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.security import decode_token
 from app.db.postgres import async_session_maker
-from app.models.user import User
 from app.models.map_entity import MapEntity
 from app.models.threat import Threat
+from app.models.user import User
 from app.services.spatial import calculate_area_from_lat
 
 sio = socketio.AsyncServer(
@@ -25,15 +26,14 @@ sio = socketio.AsyncServer(
 
 # Active connected client sessions: sid -> dict
 # {"user_id": UUID, "username": str, "role": str, "area": str, "lat": float, "lon": float}
-_connected_clients: Dict[str, Dict[str, Any]] = {}
+_connected_clients: dict[str, dict[str, Any]] = {}
 
 # Active threats cache in memory for instantaneous danger zone checks without database queries
-_active_threats_cache: Dict[str, dict] = {}
+_active_threats_cache: dict[str, dict] = {}
 _active_danger_breaches: set = set()
 
 
 async def _ensure_threats_cache_loaded(session):
-    global _active_threats_cache
     if not _active_threats_cache:
         threats_q = await session.execute(
             select(Threat, ST_Y(Threat.geom), ST_X(Threat.geom)).where(Threat.status == "active")
@@ -54,7 +54,7 @@ async def _ensure_threats_cache_loaded(session):
 
 
 @sio.event
-async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
+async def connect(sid: str, environ: dict, auth: dict | None = None):
     if not auth or "token" not in auth:
         return False
 
@@ -152,7 +152,7 @@ async def heartbeat(sid: str, data: dict):
             res = await session.execute(stmt)
             map_ent = res.scalar_one_or_none()
             if map_ent:
-                map_ent.updated_at = datetime.now(timezone.utc)
+                map_ent.updated_at = datetime.now(UTC)
                 await session.commit()
     except Exception:
         pass
@@ -180,7 +180,7 @@ async def location_update(sid: str, data: dict):
 
     target_id = client["user_id"]
     new_area = calculate_area_from_lat(lat)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     client["lat"] = lat
     client["lon"] = lon
@@ -213,37 +213,39 @@ async def location_update(sid: str, data: dict):
     # Immediately evaluate danger zone perimeter breach
     await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
 
-    # Persist to Postgres safely without blocking real-time WebSocket telemetry
-    try:
-        async with async_session_maker() as session:
-            map_stmt = select(MapEntity).where(MapEntity.id == target_id)
-            map_res = await session.execute(map_stmt)
-            map_ent = map_res.scalar_one_or_none()
+    # Persist to Postgres safely in background without blocking real-time WebSocket telemetry
+    async def _save_squad_coords():
+        try:
+            async with async_session_maker() as session:
+                map_stmt = select(MapEntity).where(MapEntity.id == target_id)
+                map_res = await session.execute(map_stmt)
+                map_ent = map_res.scalar_one_or_none()
 
-            if map_ent:
-                map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                map_ent.heading = heading
-                map_ent.updated_at = now
-            else:
-                map_ent = MapEntity(
-                    id=target_id,
-                    geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                    heading=heading,
-                    status="active",
-                    updated_at=now,
-                )
-                session.add(map_ent)
+                if map_ent:
+                    map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                    map_ent.heading = heading
+                    map_ent.updated_at = now
+                else:
+                    map_ent = MapEntity(
+                        id=target_id,
+                        geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
+                        heading=heading,
+                        status="active",
+                        updated_at=now,
+                    )
+                    session.add(map_ent)
 
-            user_stmt = select(User).where(User.id == target_id)
-            user_res = await session.execute(user_stmt)
-            user_obj = user_res.scalar_one_or_none()
-            if user_obj and user_obj.area != new_area:
-                user_obj.area = new_area
+                user_stmt = select(User).where(User.id == target_id)
+                user_res = await session.execute(user_stmt)
+                user_obj = user_res.scalar_one_or_none()
+                if user_obj and user_obj.area != new_area:
+                    user_obj.area = new_area
 
-            await _ensure_threats_cache_loaded(session)
-            await session.commit()
-    except Exception as e:
-        print(f"[SOCKET DB ERROR] Error updating squad location in db: {e}")
+                await session.commit()
+        except Exception as e:
+            print(f"[SOCKET DB ERROR] Error updating squad location in db: {e}")
+
+    asyncio.create_task(_save_squad_coords())
 
 
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -257,7 +259,7 @@ def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float
     return r * c
 
 
-async def _process_squad_threat_breach(sq_sid: Optional[str], sq_id: str, sq_name: str, sq_lat: float, sq_lon: float, t: dict):
+async def _process_squad_threat_breach(sq_sid: str | None, sq_id: str, sq_name: str, sq_lat: float, sq_lon: float, t: dict):
     if t.get("status") == "inactive" or t.get("engagement_status") == "resolved":
         return
     t_lat, t_lon = t.get("lat"), t.get("lon")
@@ -272,33 +274,33 @@ async def _process_squad_threat_breach(sq_sid: Optional[str], sq_id: str, sq_nam
     if dist <= radius:
         if breach_key not in _active_danger_breaches:
             _active_danger_breaches.add(breach_key)
+            alert_payload = {
+                "id": breach_key,
+                "threat_id": t_id,
+                "threat_name": t.get("name"),
+                "threat_type": t.get("threat_type"),
+                "severity_level": t.get("severity_level"),
+                "squad_id": sq_id,
+                "squad_name": sq_name,
+                "distance_meters": round(dist, 1),
+                "danger_radius_meters": radius,
+                "message": f"CRITICAL: {sq_name} is INSIDE danger perimeter of {t.get('name')} ({round(dist, 1)}m <= {radius}m)!",
+            }
             if sq_sid:
-                await sio.emit(
-                    "danger_zone_alert",
-                    {
-                        "id": breach_key,
-                        "threat_id": t_id,
-                        "threat_name": t.get("name"),
-                        "threat_type": t.get("threat_type"),
-                        "severity_level": t.get("severity_level"),
-                        "squad_id": sq_id,
-                        "squad_name": sq_name,
-                        "distance_meters": round(dist, 1),
-                        "danger_radius_meters": radius,
-                        "message": f"CRITICAL: {sq_name} is INSIDE danger perimeter of {t.get('name')} ({round(dist, 1)}m <= {radius}m)!",
-                    },
-                    room=sq_sid,
-                )
+                await sio.emit("danger_zone_alert", alert_payload, room=sq_sid)
+            await sio.emit("danger_zone_alert", alert_payload, room="role_MainCommandCenter")
     elif breach_key in _active_danger_breaches:
         _active_danger_breaches.remove(breach_key)
+        clear_payload = {"id": breach_key, "squad_id": sq_id, "threat_id": t_id}
         if sq_sid:
-            await sio.emit("danger_zone_cleared", {"id": breach_key, "squad_id": sq_id, "threat_id": t_id}, room=sq_sid)
+            await sio.emit("danger_zone_cleared", clear_payload, room=sq_sid)
+        await sio.emit("danger_zone_cleared", clear_payload, room="role_MainCommandCenter")
 
 
 async def check_and_broadcast_danger_alerts(
-    squad_sid: Optional[str] = None,
-    squad_info: Optional[dict] = None,
-    threat_dict: Optional[dict] = None,
+    squad_sid: str | None = None,
+    squad_info: dict | None = None,
+    threat_dict: dict | None = None,
 ):
     """
     Checks if a field squad enters a threat's danger radius (dist <= radius)
@@ -345,9 +347,7 @@ async def broadcast_to_visibility_range(
         role = info.get("role")
         area = info.get("area")
 
-        if role == "MainCommandCenter":
-            await sio.emit(event_name, payload, room=client_sid)
-        elif role == "AreaCommandCenter" and area == origin_area:
+        if role == "MainCommandCenter" or role == "AreaCommandCenter" and area == origin_area:
             await sio.emit(event_name, payload, room=client_sid)
         elif role in ["Squad", "SapperSquad", "Radar"]:
             # Radar stations monitor aerial drones anywhere across Israeli airspace

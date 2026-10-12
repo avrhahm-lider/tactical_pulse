@@ -1,8 +1,18 @@
-from datetime import datetime, timezone
-from sqlalchemy import Column, Float, String, DateTime, ForeignKey, CheckConstraint, Index
+from datetime import UTC, datetime
+
+from geoalchemy2 import Geometry
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    String,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from geoalchemy2 import Geometry
+
 from app.db.postgres import Base
 
 
@@ -19,8 +29,8 @@ class MapEntity(Base):
     status = Column(String(20), default="active", nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
 

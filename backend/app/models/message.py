@@ -1,8 +1,10 @@
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy import Column, Text, DateTime, ForeignKey
+from datetime import UTC, datetime
+
+from sqlalchemy import Column, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+
 from app.db.postgres import Base
 
 
@@ -23,7 +25,7 @@ class Message(Base):
     text = Column(Text, nullable=False)
     timestamp = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
 
