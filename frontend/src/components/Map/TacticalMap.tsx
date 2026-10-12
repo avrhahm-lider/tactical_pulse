@@ -294,7 +294,6 @@ function buildThreatPopupHtml(
     </div>
   `
 }
-
 // Calculate a safe Leaflet LatLngBounds representing a given radius around a point (in meters)
 function getRadiusBounds(lat: number, lon: number, radiusMeters = 10000): L.LatLngBounds {
   const latDelta = radiusMeters / 111320
@@ -386,7 +385,7 @@ export const TacticalMap: React.FC = () => {
       center: [31.5, 34.8],
       zoom: 8,
       minZoom: 6,
-      maxZoom: 18,
+      maxZoom: 20,
       preferCanvas: true,
       zoomControl: false,
     })
@@ -401,20 +400,34 @@ export const TacticalMap: React.FC = () => {
     )
 
     // Tactical dark base tiles (Esri Dark Gray - 100% Free, No API Key, No Watermark)
+    // maxNativeZoom: 16 tells Leaflet to upscale zoom-16 tiles up to maxZoom: 20 instead of disappearing/turning black
     const darkTiles = L.tileLayer(
       'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
       {
         attribution: '&copy; Esri &mdash; Tactical C2',
-        maxZoom: 16,
+        maxNativeZoom: 16,
+        maxZoom: 20,
       }
     )
 
-    // Real satellite imagery layer (Esri World Imagery - Free, No API Key)
+    // Real satellite imagery layer (Esri World Imagery - 100% Free, No API Key)
+    // maxNativeZoom: 18 upscales smoothly up to zoom 20
     const satelliteTiles = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
         attribution: '&copy; Esri, Maxar &mdash; Satellite',
-        maxZoom: 18,
+        maxNativeZoom: 18,
+        maxZoom: 20,
+      }
+    )
+
+    // Standard OpenStreetMap layer as alternative (100% Free, No API Key)
+    const osmTiles = L.tileLayer(
+      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxNativeZoom: 19,
+        maxZoom: 20,
       }
     )
 
@@ -425,6 +438,7 @@ export const TacticalMap: React.FC = () => {
         {
           'Tactical Dark': darkTiles,
           'Satellite View': satelliteTiles,
+          'OpenStreetMap': osmTiles,
         },
         undefined,
         { position: 'bottomleft' }
@@ -540,15 +554,6 @@ export const TacticalMap: React.FC = () => {
     [user, selectedZoneFilter, squads, threats]
   )
 
-  // Focus view on a 10km radius around a specific location (Force or Threat)
-  const focusRadius10km = useCallback((lat: number, lon: number) => {
-    const map = mapInstanceRef.current
-    if (!map) return
-    isProgrammaticMoveRef.current = true
-    const bounds = getRadiusBounds(lat, lon, 10000)
-    map.flyToBounds(bounds, { padding: [20, 20], maxZoom: 13, duration: 1.0 })
-  }, [])
-
   // Toggle Auto-Fit view mode: When ON, focuses on sector/objects. When OFF, allows independent free navigation.
   const toggleAutoFit = useCallback(() => {
     setIsAutoFitMode((prev) => {
@@ -658,13 +663,14 @@ export const TacticalMap: React.FC = () => {
 
     // Operational sector dividing lines drawn for command centers. Field teams see only their immediate range.
     if (!isFieldTeam) {
-      // Draw Dividing Border Lines only (No colored frames / polygons)
+      const areaBorderColor = '#00e5ff'
+      // Draw Dividing Border Lines in a single uniform color (No colored frames / polygons)
       L.polyline(
         [
           [32.7, 33.5],
           [32.7, 36.5],
         ],
-        { color: '#00e5ff', weight: 1.5, dashArray: '6, 6', opacity: 0.65 }
+        { color: areaBorderColor, weight: 1.5, dashArray: '6, 6', opacity: 0.65 }
       ).addTo(zonesLayer)
 
       L.polyline(
@@ -672,7 +678,7 @@ export const TacticalMap: React.FC = () => {
           [31.9, 33.5],
           [31.9, 36.5],
         ],
-        { color: '#f59e0b', weight: 1.5, dashArray: '6, 6', opacity: 0.65 }
+        { color: areaBorderColor, weight: 1.5, dashArray: '6, 6', opacity: 0.65 }
       ).addTo(zonesLayer)
     }
 
@@ -779,7 +785,7 @@ export const TacticalMap: React.FC = () => {
       const iconHeight = 36
 
       const iconHtml = `
-        <div style="position: relative; width: 36px; height: 36px; cursor: pointer; pointer-events: auto;">
+        <div style="position: relative; width: 36px; height: 36px; cursor: pointer; pointer-events: auto; display: flex; align-items: center; justify-content: center;">
           <div style="
             width: 36px;
             height: 36px;
@@ -796,24 +802,6 @@ export const TacticalMap: React.FC = () => {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="12 2 19 21 12 17 5 21 12 2"></polygon>
             </svg>
-          </div>
-          <div style="
-            position: absolute;
-            top: 40px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(10, 15, 29, 0.9);
-            color: ${stale ? '#9ca3af' : '#ffffff'};
-            font-size: 10px;
-            font-family: ui-monospace, monospace;
-            padding: 1px 5px;
-            border-radius: 3px;
-            border: 1px solid ${baseColor};
-            white-space: nowrap;
-            pointer-events: none;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.6);
-          ">
-            ${squad.name} [${roleLabel}]
           </div>
         </div>
       `
@@ -851,19 +839,18 @@ export const TacticalMap: React.FC = () => {
           newMarker
         )
 
-        // Custom toggle on click: clicking the object opens pop-up; clicking it again closes it
+        // Custom toggle on click: clicking the object opens pop-up without resizing or zooming map
         newMarker.on('click', (e) => {
           L.DomEvent.stopPropagation(e)
           newMarker.togglePopup()
           setSelectedEntity({ type: 'squad', id: squad.id })
-          focusRadius10km(squad.lat, squad.lon)
         })
 
         newMarker.addTo(markersLayer)
         squadMarkersRef.current.set(squad.id, newMarker)
       }
     })
-  }, [squads, user, setSelectedEntity, focusRadius10km])
+  }, [squads, user, setSelectedEntity])
 
   // Register global window handlers for actions triggered inside threat pop-up panels
   useEffect(() => {

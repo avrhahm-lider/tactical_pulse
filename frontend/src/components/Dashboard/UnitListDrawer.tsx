@@ -139,16 +139,6 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
           </h2>
         </div>
         <div className="flex items-center space-x-2">
-          {activeTab !== 'alerts' && (
-            <button
-              onClick={() => setIsUserRegistrationModalOpen(true)}
-              title="Register new force or headquarters"
-              className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 font-mono text-[10px] flex items-center gap-1 cursor-pointer"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>+ FORCE</span>
-            </button>
-          )}
           <button
             onClick={onClose}
             className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
