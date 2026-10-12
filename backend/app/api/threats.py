@@ -30,7 +30,7 @@ async def list_threats(
     current_user: User = Depends(get_current_user),
 ):
     caller_coords = await get_caller_coordinates(session, current_user.id)
-    stmt = await get_visible_threats_query(current_user, caller_coords, status_filter=status_filter)
+    stmt = get_visible_threats_query(current_user, caller_coords, status_filter=status_filter)
 
     if engagement_status:
         stmt = stmt.where(Threat.engagement_status == engagement_status)

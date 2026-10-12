@@ -48,23 +48,7 @@ async def list_soldiers(
         stmt = stmt.where(Soldier.squad_id == squad_id)
     stmt = stmt.order_by(Soldier.id.asc())
     result = await session.execute(stmt)
-    soldiers = result.scalars().all()
-
-    # Determine user_id for each soldier if linked
-    user_stmt = select(User.id, User.soldier_id).where(User.soldier_id.isnot(None))
-    user_res = await session.execute(user_stmt)
-    soldier_to_user = {sid: uid for uid, sid in user_res.all()}
-
-    return [
-        SoldierResponse(
-            id=s.id,
-            name=s.name,
-            role=s.role,
-            squad_id=s.squad_id,
-            user_id=soldier_to_user.get(s.id),
-        )
-        for s in soldiers
-    ]
+    return [SoldierResponse.model_validate(s) for s in result.scalars().all()]
 
 
 @router.post("/soldiers", response_model=SoldierResponse, status_code=status.HTTP_201_CREATED)
@@ -116,13 +100,7 @@ async def create_soldier(
     )
     await session.commit()
 
-    return SoldierResponse(
-        id=soldier.id,
-        name=soldier.name,
-        role=soldier.role,
-        squad_id=soldier.squad_id,
-        user_id=None,
-    )
+    return SoldierResponse.model_validate(soldier)
 
 
 @router.get("/soldiers/{soldier_id}", response_model=SoldierResponse)
@@ -140,18 +118,7 @@ async def get_soldier(
             code="NOT_FOUND",
             message=f"Soldier '{soldier_id}' not found",
         )
-
-    user_stmt = select(User.id).where(User.soldier_id == soldier_id)
-    user_res = await session.execute(user_stmt)
-    linked_user_id = user_res.scalar_one_or_none()
-
-    return SoldierResponse(
-        id=soldier.id,
-        name=soldier.name,
-        role=soldier.role,
-        squad_id=soldier.squad_id,
-        user_id=linked_user_id,
-    )
+    return SoldierResponse.model_validate(soldier)
 
 
 @router.patch("/soldiers/{soldier_id}", response_model=SoldierResponse)
@@ -188,18 +155,7 @@ async def update_soldier(
 
     await session.commit()
     await session.refresh(soldier)
-
-    user_stmt = select(User.id).where(User.soldier_id == soldier_id)
-    user_res = await session.execute(user_stmt)
-    linked_user_id = user_res.scalar_one_or_none()
-
-    return SoldierResponse(
-        id=soldier.id,
-        name=soldier.name,
-        role=soldier.role,
-        squad_id=soldier.squad_id,
-        user_id=linked_user_id,
-    )
+    return SoldierResponse.model_validate(soldier)
 
 
 @router.delete("/soldiers/{soldier_id}", response_model=MessageResponse)
@@ -237,10 +193,37 @@ async def delete_soldier(
 # USERS MANAGEMENT
 # =========================================================================
 
-def _mask_confidential_coords(role: str, lat: Optional[float], lon: Optional[float]):
-    if role in ["Radar", "AreaCommandCenter", "MainCommandCenter"]:
+def _mask_confidential_coords(role: str, lat: Optional[float], lon: Optional[float]) -> tuple[Optional[float], Optional[float]]:
+    if role in ("Radar", "AreaCommandCenter", "MainCommandCenter"):
         return None, None
     return lat, lon
+
+
+def _build_admin_user_response(
+    u: User,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    soldiers: Optional[list] = None,
+) -> AdminUserResponse:
+    m_lat, m_lon = _mask_confidential_coords(u.role, lat, lon)
+    roster = soldiers if soldiers is not None else u.soldiers
+    return AdminUserResponse(
+        id=u.id,
+        username=u.username,
+        role=u.role,
+        area=u.area,
+        name=u.name,
+        description=u.description,
+        status=u.status,
+        soldier_id=u.soldier_id,
+        soldier=SoldierResponse.model_validate(u.soldier) if u.soldier else None,
+        is_logged_in=u.is_logged_in,
+        last_activity_at=u.last_activity_at,
+        lat=m_lat,
+        lon=m_lon,
+        soldiers=[SoldierResponse.model_validate(s) for s in roster],
+        created_at=u.created_at,
+    )
 
 
 @router.get("/users", response_model=List[AdminUserResponse])
@@ -258,28 +241,7 @@ async def list_all_users(
         .order_by(User.created_at.desc())
     )
     result = await session.execute(stmt)
-    rows = result.all()
-
-    return [
-        AdminUserResponse(
-            id=u.id,
-            username=u.username,
-            role=u.role,
-            area=u.area,
-            name=u.name,
-            description=u.description,
-            status=u.status,
-            soldier_id=u.soldier_id,
-            soldier=SoldierResponse.model_validate(u.soldier) if u.soldier else None,
-            is_logged_in=u.is_logged_in,
-            last_activity_at=u.last_activity_at,
-            lat=_mask_confidential_coords(u.role, lat, lon)[0],
-            lon=_mask_confidential_coords(u.role, lat, lon)[1],
-            soldiers=[SoldierResponse.model_validate(s) for s in u.soldiers],
-            created_at=u.created_at,
-        )
-        for u, lat, lon in rows
-    ]
+    return [_build_admin_user_response(u, lat, lon) for u, lat, lon in result.all()]
 
 
 @router.post("/users", response_model=AdminUserResponse, status_code=status.HTTP_201_CREATED)
@@ -393,22 +355,13 @@ async def create_user_or_unit(
     session.add(new_user)
     await session.flush()
 
-    # Add or associate soldiers in roster
-    soldiers_created = []
-    if req.soldiers:
-        for s in req.soldiers:
-            s_exist_stmt = select(Soldier).where(Soldier.id == s.id)
-            s_exist_res = await session.execute(s_exist_stmt)
-            s_entity = s_exist_res.scalar_one_or_none()
-            if s_entity:
-                s_entity.squad_id = new_user.id
-                s_entity.name = s.name
-                s_entity.role = s.role
-                soldiers_created.append(s_entity)
-            else:
-                new_s = Soldier(id=s.id, squad_id=new_user.id, name=s.name, role=s.role)
-                session.add(new_s)
-                soldiers_created.append(new_s)
+    # Add soldiers in roster
+    soldiers_created = [
+        Soldier(id=s.id, squad_id=new_user.id, name=s.name, role=s.role)
+        for s in (req.soldiers or [])
+    ]
+    if soldiers_created:
+        session.add_all(soldiers_created)
 
     # Automatically create initial map_entity for field units or regional command centers
     if (is_field_unit or assigned_role == "AreaCommandCenter") and req.lat is not None and req.lon is not None:
@@ -432,23 +385,7 @@ async def create_user_or_unit(
     await session.commit()
     await session.refresh(new_user)
 
-    return AdminUserResponse(
-        id=new_user.id,
-        username=new_user.username,
-        role=new_user.role,
-        area=new_user.area,
-        name=new_user.name,
-        description=new_user.description,
-        status=new_user.status,
-        soldier_id=new_user.soldier_id,
-        soldier=SoldierResponse.model_validate(new_user.soldier) if new_user.soldier else None,
-        is_logged_in=new_user.is_logged_in,
-        last_activity_at=new_user.last_activity_at,
-        lat=_mask_confidential_coords(new_user.role, req.lat, req.lon)[0],
-        lon=_mask_confidential_coords(new_user.role, req.lat, req.lon)[1],
-        soldiers=[SoldierResponse.model_validate(s) for s in soldiers_created],
-        created_at=new_user.created_at,
-    )
+    return _build_admin_user_response(new_user, req.lat, req.lon, soldiers_created)
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserResponse)
@@ -531,30 +468,12 @@ async def update_user(
     await session.commit()
     await session.refresh(user)
 
-    # Fetch lat/lon
-    map_stmt = select(ST_Y(MapEntity.geom), ST_X(MapEntity.geom)).where(MapEntity.id == user.id)
-    map_res = await session.execute(map_stmt)
-    map_row = map_res.first()
-    lat = map_row[0] if map_row else None
-    lon = map_row[1] if map_row else None
+    map_row = (await session.execute(
+        select(ST_Y(MapEntity.geom), ST_X(MapEntity.geom)).where(MapEntity.id == user.id)
+    )).first()
+    lat, lon = (map_row[0], map_row[1]) if map_row else (None, None)
 
-    return AdminUserResponse(
-        id=user.id,
-        username=user.username,
-        role=user.role,
-        area=user.area,
-        name=user.name,
-        description=user.description,
-        status=user.status,
-        soldier_id=user.soldier_id,
-        soldier=SoldierResponse.model_validate(user.soldier) if user.soldier else None,
-        is_logged_in=user.is_logged_in,
-        last_activity_at=user.last_activity_at,
-        lat=_mask_confidential_coords(user.role, lat, lon)[0],
-        lon=_mask_confidential_coords(user.role, lat, lon)[1],
-        soldiers=[SoldierResponse.model_validate(s) for s in user.soldiers],
-        created_at=user.created_at,
-    )
+    return _build_admin_user_response(user, lat, lon)
 
 
 @router.patch("/users/{user_id}/status", response_model=UserResponse)

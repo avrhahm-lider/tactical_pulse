@@ -51,7 +51,7 @@ def get_zone_clause_for_geom(geom_column, area: str):
     return None
 
 
-async def get_visible_squads_query(caller: User, caller_coords: Optional[Tuple[float, float]]):
+def get_visible_squads_query(caller: User, caller_coords: Optional[Tuple[float, float]]):
     """
     Builds SQL query for active squads visible to caller:
     - MainCommandCenter: all active field units
@@ -106,7 +106,7 @@ async def get_visible_squads_query(caller: User, caller_coords: Optional[Tuple[f
     return stmt
 
 
-async def get_visible_threats_query(
+def get_visible_threats_query(
     caller: User,
     caller_coords: Optional[Tuple[float, float]],
     status_filter: Optional[str] = "active",

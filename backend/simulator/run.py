@@ -234,7 +234,7 @@ async def simulate_radar_drones(radar_username: str = "radar_post_1", radar_pass
                 return
             token = resp.json()["access_token"]
             headers = {"Authorization": f"Bearer {token}"}
-            print(f"[RADAR] Authenticated. Initializing 3 aerial drone tracks...")
+            print("[RADAR] Authenticated. Initializing 3 aerial drone tracks...")
         except Exception as e:
             print(f"[RADAR] Authentication error: {e}")
             return

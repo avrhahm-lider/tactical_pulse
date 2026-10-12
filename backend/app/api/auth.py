@@ -5,7 +5,7 @@ from typing import Dict, Tuple
 from uuid import UUID
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.postgres import get_db
 from app.models.user import User
@@ -261,7 +261,6 @@ async def reset_all_sessions_public(
     Public test/recovery utility to clear all active session locks across all users.
     Can be called directly from the login page without authentication.
     """
-    from sqlalchemy import update
     client_ip = request.client.host if request.client else "127.0.0.1"
     stmt = update(User).values(is_logged_in=False, session_id=None, last_activity_at=None)
     res = await session.execute(stmt)

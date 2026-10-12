@@ -1,15 +1,16 @@
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any, Dict, Optional
 import bcrypt
 import jwt
 from app.core.config import settings
 
 
+@lru_cache(maxsize=128)
 def hash_password(password: str) -> str:
     # Truncate to 72 bytes max as per bcrypt spec
     pwd_bytes = password.encode("utf-8")[:72]
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
+    return bcrypt.hashpw(pwd_bytes, bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

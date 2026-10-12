@@ -23,7 +23,7 @@ async def get_tactical_map_snapshot(
     caller_coords = await get_caller_coordinates(session, current_user.id)
 
     # 1. Fetch squads
-    squads_stmt = await get_visible_squads_query(current_user, caller_coords)
+    squads_stmt = get_visible_squads_query(current_user, caller_coords)
     squad_rows = (await session.execute(squads_stmt)).all()
     squads = [
         SquadSnapshotItem(
@@ -35,7 +35,7 @@ async def get_tactical_map_snapshot(
     ]
 
     # 2. Fetch active threats
-    threats_stmt = await get_visible_threats_query(current_user, caller_coords, status_filter="active")
+    threats_stmt = get_visible_threats_query(current_user, caller_coords, status_filter="active")
     threat_rows = (await session.execute(threats_stmt)).all()
     threats = [ThreatResponse.from_threat(t, lat, lon) for t, lat, lon in threat_rows]
 

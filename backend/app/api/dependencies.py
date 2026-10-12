@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import List
 from uuid import UUID
 from fastapi import Depends, status
@@ -51,7 +52,6 @@ async def get_current_user(
         )
 
     # Touch last_activity_at for rolling inactivity tracking
-    from datetime import datetime, timezone
     user.last_activity_at = datetime.now(timezone.utc)
     await session.commit()
 
