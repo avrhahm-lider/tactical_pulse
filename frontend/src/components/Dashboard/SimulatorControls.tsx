@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useMapStore } from '../../store/useMapStore'
+import { simulatorApi } from '../../services/api'
 import { simulationEngine } from '../../services/simulationEngine'
 import { isHQOrRadar } from '../../utils/squadUtils'
 
@@ -24,7 +25,33 @@ export const SimulatorControls: React.FC = () => {
   const { user } = useAuthStore()
   const { squads, threats } = useMapStore()
 
-  // Re-render when simulationEngine state changes
+  // Track backend simulator status via polling/mounting
+  const [isSimulatorRunning, setIsSimulatorRunning] = useState(false)
+  const [simMode, setSimMode] = useState<string>('stopped')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let isMounted = true
+    const fetchStatus = async () => {
+      try {
+        const status = await simulatorApi.getStatus()
+        if (isMounted) {
+          setIsSimulatorRunning(status.is_running)
+          setSimMode(status.mode)
+        }
+      } catch {
+        // Non-admin roles (e.g. Squad) may get 403; ignore gracefully
+      }
+    }
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 2000)
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
+  }, [])
+
+  // Re-render when manual simulationEngine D-Pad step changes
   const [, setTick] = useState(0)
   useEffect(() => {
     return simulationEngine.subscribe(() => setTick((t) => t + 1))
@@ -62,17 +89,76 @@ export const SimulatorControls: React.FC = () => {
     }
   }, [droneThreats, selectedDroneId])
 
+  // Rewire "MASTER SIMULATION" Button to backend REST API
+  const handleToggleMaster = async () => {
+    setLoading(true)
+    try {
+      if (isSimulatorRunning) {
+        await simulatorApi.stop()
+        setIsSimulatorRunning(false)
+        setSimMode('stopped')
+      } else {
+        await simulatorApi.start('all')
+        setIsSimulatorRunning(true)
+        setSimMode('all')
+      }
+    } catch (err) {
+      console.error('Failed to toggle master simulation:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Rewire "AUTO-PATROL (LIVE)" for Squads to backend REST API
+  const handleToggleSquadPatrol = async () => {
+    setLoading(true)
+    try {
+      if (isSimulatorRunning && simMode === 'squads') {
+        await simulatorApi.stop()
+        setIsSimulatorRunning(false)
+        setSimMode('stopped')
+      } else {
+        await simulatorApi.start('squads')
+        setIsSimulatorRunning(true)
+        setSimMode('squads')
+      }
+    } catch (err) {
+      console.error('Failed to toggle squad patrol:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Rewire "START DRONE LIVE" / Radar Simulation to backend REST API
+  const handleToggleDroneFlight = async () => {
+    setLoading(true)
+    try {
+      if (isSimulatorRunning && simMode === 'drones') {
+        await simulatorApi.stop()
+        setIsSimulatorRunning(false)
+        setSimMode('stopped')
+      } else {
+        await simulatorApi.start('drones')
+        setIsSimulatorRunning(true)
+        setSimMode('drones')
+      }
+    } catch (err) {
+      console.error('Failed to toggle drone flight:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (!user) return null
 
   const role = user.role
-  const isMasterLive = simulationEngine.isMasterLive()
 
   // -------------------------------------------------------------
   // 1. COMBAT SQUADS VIEW (Squad / SapperSquad)
   // -------------------------------------------------------------
   if (role === 'Squad' || role === 'SapperSquad') {
     const mySquad = squads[user.id]
-    const isLive = simulationEngine.isSquadLive(user.id)
+    const isLive = isSimulatorRunning && (simMode === 'squads' || simMode === 'all')
 
     return (
       <div className="absolute bottom-6 left-6 z-[1000] hud-panel w-72 rounded-xl border border-cyan-800 shadow-2xl hud-glow-cyan text-xs font-mono">
@@ -140,15 +226,10 @@ export const SimulatorControls: React.FC = () => {
               <div></div>
             </div>
 
-            {/* Auto-Patrol Live Toggle */}
+            {/* Auto-Patrol Live Toggle via Backend REST API */}
             <button
-              onClick={() => {
-                if (isLive) {
-                  simulationEngine.stopSquadLive(user.id)
-                } else {
-                  simulationEngine.startSquadLive(user.id)
-                }
-              }}
+              onClick={handleToggleSquadPatrol}
+              disabled={loading}
               className={`w-full py-2 px-3 rounded-lg font-semibold flex items-center justify-center space-x-2 cursor-pointer transition-all ${
                 isLive
                   ? 'bg-red-950/90 hover:bg-red-900 border border-red-600 text-red-200 shadow-md shadow-red-950/50 animate-pulse'
@@ -178,7 +259,7 @@ export const SimulatorControls: React.FC = () => {
   // -------------------------------------------------------------
   if (role === 'Radar') {
     const curDrone = droneThreats.find((d) => d.id === selectedDroneId)
-    const isCurDroneLive = selectedDroneId ? simulationEngine.isDroneLive(selectedDroneId) : false
+    const isDroneLive = isSimulatorRunning && (simMode === 'drones' || simMode === 'all')
 
     return (
       <div className="absolute bottom-6 left-6 z-[1000] hud-panel w-84 rounded-xl border border-sky-800 shadow-2xl hud-glow-cyan text-xs font-mono">
@@ -290,23 +371,18 @@ export const SimulatorControls: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Live Flight Actions */}
+                {/* Live Flight Actions via Backend REST API */}
                 <div className="space-y-1.5 pt-1">
                   <button
-                    onClick={() => {
-                      if (isCurDroneLive) {
-                        simulationEngine.stopDroneLive(selectedDroneId)
-                      } else {
-                        simulationEngine.startDroneLive(selectedDroneId)
-                      }
-                    }}
+                    onClick={handleToggleDroneFlight}
+                    disabled={loading}
                     className={`w-full py-1.5 px-3 rounded font-semibold flex items-center justify-center space-x-2 cursor-pointer transition-colors ${
-                      isCurDroneLive
+                      isDroneLive
                         ? 'bg-red-950 hover:bg-red-900 border border-red-700 text-red-200'
                         : 'bg-sky-950 hover:bg-sky-900 border border-sky-600 text-sky-200'
                     }`}
                   >
-                    {isCurDroneLive ? (
+                    {isDroneLive ? (
                       <>
                         <Square className="w-3.5 h-3.5" />
                         <span>STOP DRONE FLIGHT</span>
@@ -320,11 +396,12 @@ export const SimulatorControls: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={() => simulationEngine.startAllDronesLive(droneThreats)}
+                    onClick={handleToggleDroneFlight}
+                    disabled={loading}
                     className="w-full py-1.5 px-3 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-600 text-amber-300 font-semibold flex items-center justify-center space-x-1.5 cursor-pointer"
                   >
                     <Rocket className="w-3.5 h-3.5" />
-                    <span>LAUNCH ALL DRONES LIVE</span>
+                    <span>{isDroneLive ? 'STOP DRONE SIMULATION' : 'LAUNCH DRONES (BACKEND)'}</span>
                   </button>
                 </div>
               </>
@@ -339,10 +416,10 @@ export const SimulatorControls: React.FC = () => {
   // 3. MAIN COMMAND CENTER (Admin) & AREA COMMAND CENTER
   // -------------------------------------------------------------
   const curSquad = combatSquads.find((s) => s.id === selectedSquadId)
-  const isCurSquadLive = selectedSquadId ? simulationEngine.isSquadLive(selectedSquadId) : false
+  const isSquadLive = isSimulatorRunning && (simMode === 'squads' || simMode === 'all')
 
   const curDrone = droneThreats.find((d) => d.id === selectedDroneId)
-  const isCurDroneLive = selectedDroneId ? simulationEngine.isDroneLive(selectedDroneId) : false
+  const isDroneLive = isSimulatorRunning && (simMode === 'drones' || simMode === 'all')
 
   return (
     <div className="absolute bottom-6 left-6 z-[1000] hud-panel w-96 rounded-xl border border-cyan-800 shadow-2xl hud-glow-cyan text-xs font-mono">
@@ -362,25 +439,20 @@ export const SimulatorControls: React.FC = () => {
 
       {!isCollapsed && (
         <div className="p-3 space-y-3">
-          {/* Prominent Master Toggle Button */}
+          {/* Prominent Master Toggle Button via Backend REST API */}
           <button
-            onClick={() => {
-              if (isMasterLive) {
-                simulationEngine.stopMasterSimulation()
-              } else {
-                simulationEngine.startMasterSimulation(squads, droneThreats)
-              }
-            }}
+            onClick={handleToggleMaster}
+            disabled={loading}
             className={`w-full py-2.5 px-3 rounded-lg font-bold flex items-center justify-center space-x-2 cursor-pointer transition-all shadow-lg ${
-              isMasterLive
+              isSimulatorRunning
                 ? 'bg-red-950 hover:bg-red-900 border border-red-500 text-red-200 shadow-red-950/50 animate-pulse'
                 : 'bg-gradient-to-r from-cyan-950 via-blue-950 to-emerald-950 hover:from-cyan-900 hover:to-emerald-900 border border-cyan-500 text-cyan-200 shadow-cyan-950/50'
             }`}
           >
-            {isMasterLive ? (
+            {isSimulatorRunning ? (
               <>
                 <Square className="w-4 h-4" />
-                <span>⏹ STOP MASTER SIMULATION</span>
+                <span>⏹ STOP MASTER SIMULATION ({simMode.toUpperCase()})</span>
               </>
             ) : (
               <>
@@ -491,21 +563,17 @@ export const SimulatorControls: React.FC = () => {
                     <div></div>
                   </div>
 
+                  {/* Auto-Patrol via Backend REST API */}
                   <button
-                    onClick={() => {
-                      if (isCurSquadLive) {
-                        simulationEngine.stopSquadLive(selectedSquadId)
-                      } else {
-                        simulationEngine.startSquadLive(selectedSquadId)
-                      }
-                    }}
+                    onClick={handleToggleSquadPatrol}
+                    disabled={loading}
                     className={`w-full py-1.5 px-3 rounded font-semibold flex items-center justify-center space-x-2 cursor-pointer transition-colors ${
-                      isCurSquadLive
+                      isSquadLive
                         ? 'bg-red-950 hover:bg-red-900 border border-red-700 text-red-200'
                         : 'bg-cyan-950 hover:bg-cyan-900 border border-cyan-600 text-cyan-200'
                     }`}
                   >
-                    {isCurSquadLive ? (
+                    {isSquadLive ? (
                       <>
                         <Square className="w-3.5 h-3.5" />
                         <span>STOP LIVE PATROL</span>
@@ -610,27 +678,23 @@ export const SimulatorControls: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
-                      onClick={() => {
-                        if (isCurDroneLive) {
-                          simulationEngine.stopDroneLive(selectedDroneId)
-                        } else {
-                          simulationEngine.startDroneLive(selectedDroneId)
-                        }
-                      }}
+                      onClick={handleToggleDroneFlight}
+                      disabled={loading}
                       className={`py-1.5 px-2 rounded font-semibold text-[11px] flex items-center justify-center space-x-1 cursor-pointer transition-colors ${
-                        isCurDroneLive
+                        isDroneLive
                           ? 'bg-red-950 hover:bg-red-900 border border-red-700 text-red-200'
                           : 'bg-sky-950 hover:bg-sky-900 border border-sky-600 text-sky-200'
                       }`}
                     >
-                      <span>{isCurDroneLive ? 'STOP DRONE' : 'FLY DRONE'}</span>
+                      <span>{isDroneLive ? 'STOP DRONES' : 'FLY DRONES'}</span>
                     </button>
 
                     <button
-                      onClick={() => simulationEngine.startAllDronesLive(droneThreats)}
+                      onClick={handleToggleMaster}
+                      disabled={loading}
                       className="py-1.5 px-2 rounded bg-amber-950/80 hover:bg-amber-900 border border-amber-600 text-amber-300 font-semibold text-[11px] flex items-center justify-center space-x-1 cursor-pointer"
                     >
-                      <span>ALL DRONES</span>
+                      <span>{isSimulatorRunning ? 'STOP ALL' : 'ALL UNITS'}</span>
                     </button>
                   </div>
                 </>
@@ -654,10 +718,10 @@ export const SimulatorControls: React.FC = () => {
                   <span>SIMULATION STATE:</span>
                   <span
                     className={`font-bold ${
-                      isMasterLive ? 'text-emerald-400 animate-pulse' : 'text-slate-500'
+                      isSimulatorRunning ? 'text-emerald-400 animate-pulse' : 'text-slate-500'
                     }`}
                   >
-                    {isMasterLive ? 'LIVE AUTONOMOUS (ACTIVE)' : 'STANDBY'}
+                    {isSimulatorRunning ? `LIVE AUTONOMOUS (${simMode.toUpperCase()})` : 'STANDBY'}
                   </span>
                 </div>
               </div>

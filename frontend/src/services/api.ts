@@ -151,4 +151,28 @@ export const api = {
       return res.data
     },
   },
+  simulator: {
+    getStatus: async (): Promise<SimulatorStatus> => {
+      const res = await apiClient.get<SimulatorStatus>('/admin/simulator/status')
+      return res.data
+    },
+    start: async (mode: 'all' | 'squads' | 'drones' = 'all') => {
+      const res = await apiClient.post<{ is_running: boolean; mode: string }>('/admin/simulator/start', { mode })
+      return res.data
+    },
+    stop: async () => {
+      const res = await apiClient.post<{ is_running: boolean; mode: string }>('/admin/simulator/stop')
+      return res.data
+    },
+  },
 }
+
+export interface SimulatorStatus {
+  is_running: boolean
+  mode: 'all' | 'squads' | 'drones' | 'stopped'
+  active_tasks: string[]
+  squads_active: number
+  drones_active: number
+}
+
+export const simulatorApi = api.simulator
