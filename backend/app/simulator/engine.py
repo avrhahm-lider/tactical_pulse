@@ -191,36 +191,39 @@ class SimulatorEngine:
                 client["area"] = area
                 await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
 
-        # 3. Persist to Postgres safely without blocking real-time WebSocket telemetry
-        try:
-            async with async_session_maker() as session:
-                map_stmt = select(MapEntity).where(MapEntity.id == squad_id)
-                map_res = await session.execute(map_stmt)
-                map_ent = map_res.scalar_one_or_none()
+        # 3. Persist to Postgres safely in background without blocking real-time WebSocket loop
+        async def _save_squad_coords():
+            try:
+                async with async_session_maker() as session:
+                    map_stmt = select(MapEntity).where(MapEntity.id == squad_id)
+                    map_res = await session.execute(map_stmt)
+                    map_ent = map_res.scalar_one_or_none()
 
-                if map_ent:
-                    map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                    map_ent.heading = heading
-                    map_ent.updated_at = now
-                else:
-                    map_ent = MapEntity(
-                        id=squad_id,
-                        geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                        heading=heading,
-                        status="active",
-                        updated_at=now,
-                    )
-                    session.add(map_ent)
+                    if map_ent:
+                        map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                        map_ent.heading = heading
+                        map_ent.updated_at = now
+                    else:
+                        map_ent = MapEntity(
+                            id=squad_id,
+                            geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
+                            heading=heading,
+                            status="active",
+                            updated_at=now,
+                        )
+                        session.add(map_ent)
 
-                user_stmt = select(User).where(User.id == squad_id)
-                user_res = await session.execute(user_stmt)
-                user_obj = user_res.scalar_one_or_none()
-                if user_obj and user_obj.area != area:
-                    user_obj.area = area
+                    user_stmt = select(User).where(User.id == squad_id)
+                    user_res = await session.execute(user_stmt)
+                    user_obj = user_res.scalar_one_or_none()
+                    if user_obj and user_obj.area != area:
+                        user_obj.area = area
 
-                await session.commit()
-        except Exception as e:
-            print(f"[SIMULATOR DB ERROR] Error updating squad location: {e}")
+                    await session.commit()
+            except Exception as e:
+                print(f"[SIMULATOR DB ERROR] Error updating squad location: {e}")
+
+        asyncio.create_task(_save_squad_coords())
 
     async def update_drone_location(
         self,
@@ -265,7 +268,7 @@ class SimulatorEngine:
 
         asyncio.create_task(_save_drone_coords())
 
-    async def _run_squad_patrol(self, squad_username: str, squad_id: UUID, path: list, delay: float = 0.8):
+    async def _run_squad_patrol(self, squad_username: str, squad_id: UUID, path: list, delay: float = 0.25):
         total = len(path)
         step = self._step_indices.get(squad_username, 0)
         try:
@@ -378,14 +381,14 @@ class SimulatorEngine:
             squads_stmt = select(User).where(User.role.in_(["Squad", "SapperSquad"]), User.status == "active")
             squads = (await session.execute(squads_stmt)).scalars().all()
 
-        # Launch squad simulations (Slow, realistic, and smooth: 5m step, 0.8s delay)
+        # Launch squad simulations (Slow, realistic, and silky smooth: 1.0m step, 0.25s delay)
         if mode in ["all", "squads"]:
             for u in squads:
                 key = u.username if u.username in SQUAD_ROUTES else "squad_golani"
-                dense_path = interpolate_route_2d(SQUAD_ROUTES[key], step_meters=5.0)
+                dense_path = interpolate_route_2d(SQUAD_ROUTES[key], step_meters=1.0)
                 task_name = f"squad_{u.username}"
                 self._tasks[task_name] = asyncio.create_task(
-                    self._run_squad_patrol(u.username, u.id, dense_path, delay=0.8)
+                    self._run_squad_patrol(u.username, u.id, dense_path, delay=0.25)
                 )
 
         # Launch drone simulations (High-speed aerial sweep: 160m step, 0.3s delay)
