@@ -50,90 +50,116 @@ GROUND_THREATS = [
     },
 ]
 
-# 2. Dynamic UAV / Drone Patrol Trajectories (High-speed aerial sweep)
+# 2. Dynamic UAV / Drone Patrol Trajectories (High-speed aerial sweeps)
 DRONE_CONFIGS = [
     {
         "name": "Hostile Recon UAV Alpha",
         "severity": "critical",
         "radius": 180.0,
-        # Tactical aerial orbit sweeping over central AO and Golani path
+        "speed_kmh": 100.0,  # 100 km/h: ~6.94m per 250ms tick
+        # Pattern 1: Wide Elliptical Reconnaissance Orbit (Овал)
         "key_points": [
-            (32.0880, 34.7830, 350.0),
-            (32.0915, 34.7875, 390.0),  # Sweeps over Ambush Alpha & Golani sector
-            (32.0990, 34.7940, 420.0),
-            (32.1040, 34.8020, 440.0),
-            (32.0980, 34.8050, 410.0),
-            (32.0920, 34.7930, 370.0),
+            (32.0880, 34.7830, 380.0),  # SW apex (Start & Finish)
+            (32.0960, 34.7840, 410.0),  # NW arc
+            (32.1020, 34.7930, 440.0),  # North apex
+            (32.1000, 34.8040, 420.0),  # NE arc
+            (32.0920, 34.8030, 390.0),  # SE arc
+            (32.0860, 34.7940, 380.0),  # South arc
+            (32.0880, 34.7830, 380.0),  # Return to SW apex
         ],
     },
     {
         "name": "Kamikaze Drone Bravo",
         "severity": "high",
         "radius": 160.0,
-        # Slalom / figure-8 pattern sweeping over eastern sector and Paratroopers path
+        "speed_kmh": 60.0,  # 60 km/h: ~4.17m per 250ms tick
+        # Pattern 2: Figure-8 / Infinity Lemniscate Loop (Восьмёрка)
         "key_points": [
-            (32.0905, 34.7910, 210.0),
-            (32.0955, 34.7965, 240.0),  # Sweeps over Minefield Bravo & Paratroopers sector
-            (32.1010, 34.8030, 280.0),
-            (32.0970, 34.8090, 270.0),
-            (32.0925, 34.8000, 230.0),
+            (32.0950, 34.7960, 250.0),  # Central crossover (Start & Finish)
+            (32.0990, 34.7910, 280.0),  # West lobe top
+            (32.0970, 34.7860, 260.0),  # West lobe apex
+            (32.0920, 34.7890, 230.0),  # West lobe bottom
+            (32.0950, 34.7960, 250.0),  # Central crossover
+            (32.0910, 34.8030, 220.0),  # East lobe bottom
+            (32.0940, 34.8080, 240.0),  # East lobe apex
+            (32.0980, 34.8040, 270.0),  # East lobe top
+            (32.0950, 34.7960, 250.0),  # Return to central crossover
         ],
     },
 ]
 
-# 3. Ground Combat Squads (Realistic infantry patrol pace)
+# 3. Ground Combat Squads (Realistic patrol profiles & paces)
 SQUAD_CONFIGS = [
     {
         "username": "squad_golani",
         "role": "Squad",
         "name": "Golani Recon Squad",
-        "description": "Elite forward reconnaissance patrol",
+        "description": "Mobile motorized patrol (40 km/h)",
         "area": "Center",
-        "start_point": (32.0853, 34.7818),
+        "speed_kmh": 40.0,  # 40 km/h: ~2.78m per 250ms tick
+        "start_point": (32.0850, 34.7880),
         "soldier_id": "1000001",
         "soldier_name": "David Cohen",
         "soldier_role": "commander",
-        # Route enters and crosses Hostile Ambush Alpha at (32.0915, 34.7875)
+        # Pattern 3: Diamond / Rhombus Perimeter Circuit (Ромб)
+        # Enters Hostile Ambush Alpha (32.0915, 34.7875, r=220m) triggering tactical breach alerts
         "route": [
-            (32.0853, 34.7818),
-            (32.0880, 34.7845),
-            (32.0915, 34.7875),  # INTRUSION: Penetrates Hostile Ambush Alpha (radius 220m)!
-            (32.0945, 34.7910),  # Exits Ambush Alpha perimeter
-            (32.0935, 34.7945),
-            (32.0905, 34.7925),
-            (32.0875, 34.7870),
+            (32.0850, 34.7880),  # South apex (Start & Finish)
+            (32.0920, 34.7820),  # West apex
+            (32.0915, 34.7875),  # INTRUSION: Penetrates Hostile Ambush Alpha perimeter!
+            (32.0990, 34.7880),  # North apex
+            (32.0920, 34.7940),  # East apex
+            (32.0850, 34.7880),  # Return to South apex
         ],
     },
     {
         "username": "squad_paratroopers",
         "role": "SapperSquad",
         "name": "Paratroopers Sapper Squad",
-        "description": "Combat engineering & EOD assault unit",
+        "description": "Tactical EOD foot patrol (8 km/h)",
         "area": "Center",
-        "start_point": (32.0920, 34.7890),
+        "speed_kmh": 8.0,  # 8 km/h: ~0.56m per 250ms tick
+        "start_point": (32.0920, 34.7920),
         "soldier_id": "2000001",
         "soldier_name": "Ariel Mizrahi",
         "soldier_role": "commander",
-        # Route enters and crosses Minefield Perimeter Bravo at (32.0955, 34.7965)
+        # Pattern 4: Tactical Zig-Zag / Staircase Grid Sweep (Зигзаг / Ступенчатый сапёрный обход)
+        # Penetrates Minefield Perimeter Bravo (32.0955, 34.7965, r=200m) for minefield reconnaissance
         "route": [
-            (32.0920, 34.7890),
-            (32.0945, 34.7925),
-            (32.0955, 34.7965),  # INTRUSION: Penetrates Minefield Perimeter Bravo (radius 200m)!
-            (32.0980, 34.8000),  # Exits Minefield perimeter
-            (32.0965, 34.8030),
-            (32.0930, 34.8000),
-            (32.0910, 34.7950),
+            (32.0920, 34.7920),  # Sector entry (Start & Finish)
+            (32.0950, 34.7920),  # North step 1
+            (32.0955, 34.7965),  # INTRUSION: Penetrates Minefield Perimeter Bravo!
+            (32.0980, 34.7965),  # North step 2 (minefield sweep)
+            (32.0980, 34.8010),  # East flank step
+            (32.0940, 34.8010),  # South flank step
+            (32.0940, 34.7960),  # West clearance step
+            (32.0920, 34.7920),  # Return to sector entry
         ],
     },
 ]
 
 
 def interpolate_route(key_points: list, step_meters: float = 1.0) -> list:
-    """Subdivides 2D or 3D waypoints into smooth micro-steps to eliminate jumping."""
+    """
+    Subdivides 2D or 3D waypoints into smooth micro-steps.
+    Supports closed loops ending at the start point without duplicate stationary steps.
+    """
     dense = []
     n = len(key_points)
-    for i in range(n):
-        p1, p2 = key_points[i], key_points[(i + 1) % n]
+    if n < 2:
+        return key_points
+
+    # If the last waypoint is already the start point, interpolate n-1 segments.
+    # Otherwise interpolate all n segments wrapping around back to index 0.
+    is_explicitly_closed = (
+        round(key_points[0][0], 6) == round(key_points[-1][0], 6)
+        and round(key_points[0][1], 6) == round(key_points[-1][1], 6)
+    )
+    segments = n - 1 if is_explicitly_closed else n
+
+    for i in range(segments):
+        p1 = key_points[i]
+        p2 = key_points[(i + 1) % n]
         d_lat_m = (p2[0] - p1[0]) * 111320.0
         d_lon_m = (p2[1] - p1[1]) * 111320.0 * math.cos(math.radians((p1[0] + p2[0]) / 2))
         dist_m = math.hypot(d_lat_m, d_lon_m)
@@ -367,7 +393,7 @@ class SimulatorEngine:
 
     async def _run_squad_patrol(self, squad_username: str, squad_id: UUID, path: list, delay: float = 0.25):
         """
-        Autonomous squad patrol: 1.0 meter step every 250ms (~4.0 m/s = 14.4 km/h brisk tactical advance).
+        Autonomous squad patrol along pre-interpolated closed-loop tactical path at configured speed.
         """
         total = len(path)
         step = self._step_indices.get(squad_username, 0)
@@ -386,7 +412,7 @@ class SimulatorEngine:
 
     async def _run_drone_flight(self, threat_id: UUID, path: list, cfg: dict, delay: float = 0.25):
         """
-        Autonomous UAV reconnaissance: 5.5 meters step every 250ms (~22 m/s = 79.2 km/h tactical flight).
+        Autonomous UAV reconnaissance flight along pre-interpolated closed-loop trajectory at configured speed.
         """
         total = len(path)
         step = self._step_indices.get(str(threat_id), 0)
@@ -546,11 +572,11 @@ class SimulatorEngine:
                     session.add(user)
                     await session.flush()
 
-                # Ensure squad has MapEntity
+                # Ensure squad has MapEntity reset to route start point
                 map_stmt = select(MapEntity).where(MapEntity.id == user.id)
                 map_ent = (await session.execute(map_stmt)).scalar_one_or_none()
+                start_pt = sc["start_point"]
                 if not map_ent:
-                    start_pt = sc["start_point"]
                     map_ent = MapEntity(
                         id=user.id,
                         geom=WKTElement(f"POINT({start_pt[1]} {start_pt[0]})", srid=4326),
@@ -558,6 +584,10 @@ class SimulatorEngine:
                         status="active",
                     )
                     session.add(map_ent)
+                    await session.flush()
+                else:
+                    map_ent.geom = WKTElement(f"POINT({start_pt[1]} {start_pt[0]})", srid=4326)
+                    map_ent.status = "active"
                     await session.flush()
 
                 active_squad_users.append((user, sc))
@@ -567,19 +597,23 @@ class SimulatorEngine:
             # 4. Synchronize memory threat cache for instant danger zone detection
             await _ensure_threats_cache_loaded(session)
 
-        # 5. Launch squad patrol tasks
+        # 5. Launch squad patrol tasks with exact speed configuration
         if mode in ["all", "squads"]:
             for u, sc in active_squad_users:
-                dense_path = interpolate_route_2d(sc["route"], step_meters=1.0)
+                speed_kmh = sc.get("speed_kmh", 40.0)
+                step_m = max(0.2, (speed_kmh / 3.6) * 0.25)
+                dense_path = interpolate_route_2d(sc["route"], step_meters=step_m)
                 task_name = f"squad_{u.username}"
                 self._tasks[task_name] = asyncio.create_task(
                     self._run_squad_patrol(u.username, u.id, dense_path, delay=0.25)
                 )
 
-        # 6. Launch drone flight tasks
+        # 6. Launch drone flight tasks with exact speed configuration
         if mode in ["all", "drones"]:
             for d, cfg in active_drones:
-                dense_path = interpolate_route_3d(cfg["key_points"], step_meters=5.5)
+                speed_kmh = cfg.get("speed_kmh", 100.0)
+                step_m = max(0.5, (speed_kmh / 3.6) * 0.25)
+                dense_path = interpolate_route_3d(cfg["key_points"], step_meters=step_m)
                 task_name = f"drone_{d.id}"
                 self._tasks[task_name] = asyncio.create_task(
                     self._run_drone_flight(d.id, dense_path, cfg, delay=0.25)
