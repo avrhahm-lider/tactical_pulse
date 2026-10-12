@@ -5,7 +5,10 @@ from pydantic import BaseModel, Field
 
 from app.models.user import User
 from app.api.dependencies import require_main_command
-from simulator.engine import simulator_engine
+try:
+    from simulator.engine import simulator_engine
+except ImportError:
+    from backend.simulator.engine import simulator_engine  # type: ignore
 
 router = APIRouter(prefix="/admin/simulator", tags=["Tactical Simulator"])
 
