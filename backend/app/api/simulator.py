@@ -3,12 +3,19 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
+import sys
+from pathlib import Path
+
+# Ensure both backend root and repo root are on sys.path
+_backend_root = str(Path(__file__).resolve().parents[2])
+_repo_root = str(Path(__file__).resolve().parents[3])
+for _p in (_backend_root, _repo_root):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from app.models.user import User
 from app.api.dependencies import require_main_command
-try:
-    from simulator.engine import simulator_engine
-except ImportError:
-    from backend.simulator.engine import simulator_engine  # type: ignore
+from backend.simulator.engine import simulator_engine
 
 router = APIRouter(prefix="/admin/simulator", tags=["Tactical Simulator"])
 
