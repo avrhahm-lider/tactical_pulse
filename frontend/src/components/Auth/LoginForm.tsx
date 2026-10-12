@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Shield, Lock, User, AlertCircle, ChevronRight, Terminal, RotateCcw, CheckCircle2 } from 'lucide-react'
+import { Lock, User, AlertCircle, ChevronRight, Terminal, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { api } from '../../services/api'
 
@@ -55,8 +55,8 @@ export const LoginForm: React.FC = () => {
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-emerald-500"></div>
 
         <div className="flex items-center space-x-3 mb-6">
-          <div className="p-3 rounded-lg bg-cyan-950/60 border border-cyan-500/50 text-cyan-400">
-            <Shield className="w-8 h-8" />
+          <div className="w-14 h-14 rounded-xl bg-cyan-950/80 border border-cyan-500/50 shadow-lg shadow-cyan-900/40 overflow-hidden flex items-center justify-center p-1">
+            <img src="/logo.png" alt="Tactical Pulse Logo" className="w-full h-full object-cover rounded-lg" />
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-wider text-white flex items-center gap-2">

@@ -1,6 +1,5 @@
 import React from 'react'
 import {
-  Shield,
   Radio,
   AlertTriangle,
   Users,
@@ -64,8 +63,8 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Left: Branding & Live Indicators */}
       <div className="flex items-center space-x-6">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-lg bg-cyan-950 border border-cyan-500/60 flex items-center justify-center text-cyan-400 shadow-md shadow-cyan-900/30">
-            <Shield className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-lg bg-cyan-950 border border-cyan-500/60 flex items-center justify-center shadow-md shadow-cyan-900/30 overflow-hidden p-0.5">
+            <img src="/logo.png" alt="Tactical Pulse Logo" className="w-full h-full object-cover rounded" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
