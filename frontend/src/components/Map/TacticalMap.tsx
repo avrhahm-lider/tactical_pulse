@@ -348,6 +348,7 @@ export const TacticalMap: React.FC = () => {
   const mapInstanceRef = useRef<L.Map | null>(null)
   const markersLayerRef = useRef<L.LayerGroup | null>(null)
   const threatsLayerRef = useRef<L.LayerGroup | null>(null)
+  const threatVectorsLayerRef = useRef<L.LayerGroup | null>(null)
   const zonesLayerRef = useRef<L.LayerGroup | null>(null)
   const pinMarkerRef = useRef<L.Marker | null>(null)
   const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
@@ -449,6 +450,7 @@ export const TacticalMap: React.FC = () => {
 
     // Layers
     zonesLayerRef.current = L.layerGroup().addTo(map)
+    threatVectorsLayerRef.current = L.layerGroup().addTo(map)
     threatsLayerRef.current = L.layerGroup().addTo(map)
     markersLayerRef.current = L.layerGroup().addTo(map)
 
@@ -457,10 +459,12 @@ export const TacticalMap: React.FC = () => {
     mapInstanceRef.current = map
 
     return () => {
+      threatVectorsLayerRef.current?.remove()
       map.remove()
       mapInstanceRef.current = null
       svgRendererRef.current = null
       squadMarkersRef.current.clear()
+      threatMarkersRef.current.clear()
     }
   }, [])
 
@@ -915,6 +919,7 @@ export const TacticalMap: React.FC = () => {
   // Render Threats: Icon-only markers, subtle unobtrusive border line (no area coloring), and toggleable action panels
   useEffect(() => {
     const threatsLayer = threatsLayerRef.current
+    const threatVectorsLayer = threatVectorsLayerRef.current
     if (!threatsLayer) return
 
     // Clean up markers of threats that are no longer active
@@ -931,8 +936,8 @@ export const TacticalMap: React.FC = () => {
       }
     }
 
-    // Clear auxiliary dynamic vector layers (danger circles and breach lines)
-    threatsLayer.clearLayers()
+    // Clear ONLY auxiliary dynamic vector layers (danger circles and breach lines), leaving markers intact
+    threatVectorsLayer?.clearLayers()
 
     Object.values(threats).forEach((threat: Threat) => {
       if (threat.status === 'inactive') return
@@ -950,33 +955,35 @@ export const TacticalMap: React.FC = () => {
       const isRedZone = isUnderIntrusion || threat.engagement_status === 'unassigned' || threatColor === '#ef4444'
 
       // Subtle, unobtrusive border line for threat danger zone: NO area-based coloring (fill: false)
-      L.circle([threat.lat, threat.lon], {
-        radius,
-        renderer: svgRendererRef.current || undefined,
-        color: isUnderIntrusion ? '#ff0033' : threatColor,
-        fill: false,
-        fillOpacity: 0,
-        weight: isUnderIntrusion ? 1.8 : 1.2,
-        opacity: isUnderIntrusion ? 0.9 : 0.65,
-        dashArray: isUnderIntrusion ? '4, 4' : '5, 5',
-        interactive: false,
-      }).addTo(threatsLayer)
+      if (threatVectorsLayer) {
+        L.circle([threat.lat, threat.lon], {
+          radius,
+          renderer: svgRendererRef.current || undefined,
+          color: isUnderIntrusion ? '#ff0033' : threatColor,
+          fill: false,
+          fillOpacity: 0,
+          weight: isUnderIntrusion ? 1.8 : 1.2,
+          opacity: isUnderIntrusion ? 0.9 : 0.65,
+          dashArray: isUnderIntrusion ? '4, 4' : '5, 5',
+          interactive: false,
+        }).addTo(threatVectorsLayer)
 
-      // If under active intrusion, draw dashed alert line to the endangered squad
-      if (isUnderIntrusion) {
-        dangerZoneAlerts
-          .filter((a) => a.threat_id === threat.id)
-          .forEach((alert) => {
-            const sq = squads[alert.squad_id]
-            if (sq) {
-              L.polyline([[threat.lat, threat.lon], [sq.lat, sq.lon]], {
-                color: '#ff0033',
-                weight: 2,
-                dashArray: '5, 5',
-                opacity: 0.85,
-              }).addTo(threatsLayer)
-            }
-          })
+        // If under active intrusion, draw dashed alert line to the endangered squad
+        if (isUnderIntrusion) {
+          dangerZoneAlerts
+            .filter((a) => a.threat_id === threat.id)
+            .forEach((alert) => {
+              const sq = squads[alert.squad_id]
+              if (sq) {
+                L.polyline([[threat.lat, threat.lon], [sq.lat, sq.lon]], {
+                  color: '#ff0033',
+                  weight: 2,
+                  dashArray: '5, 5',
+                  opacity: 0.85,
+                }).addTo(threatVectorsLayer)
+              }
+            })
+        }
       }
 
       // Icon-only tactical marker: marked strictly by one of two icons (drone or other threats), NO text label
