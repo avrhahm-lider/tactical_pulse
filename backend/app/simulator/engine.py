@@ -175,6 +175,10 @@ class SimulatorEngine:
         self._step_indices: dict[str, int] = {}
         self._is_running = False
         self._current_mode = "stopped"
+        self._last_db_save: dict[str, float] = {}
+        self._db_save_in_flight: set[str] = set()
+        self._latest_squad_state: dict[UUID, tuple[float, float, float, str, datetime]] = {}
+        self._latest_drone_state: dict[UUID, tuple[float, float, float, datetime]] = {}
 
     @property
     def is_running(self) -> bool:
@@ -193,18 +197,89 @@ class SimulatorEngine:
             "drones_active": len([k for k in self._tasks if k.startswith("drone_")]),
         }
 
+    async def _persist_squad_coords(
+        self,
+        squad_id: UUID,
+        lat: float,
+        lon: float,
+        heading: float,
+        area: str,
+        now: datetime,
+    ):
+        key = f"squad_{squad_id}"
+        self._db_save_in_flight.add(key)
+        try:
+            async with async_session_maker() as session:
+                map_stmt = select(MapEntity).where(MapEntity.id == squad_id)
+                map_res = await session.execute(map_stmt)
+                map_ent = map_res.scalar_one_or_none()
+
+                if map_ent:
+                    map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                    map_ent.heading = heading
+                    map_ent.updated_at = now
+                else:
+                    map_ent = MapEntity(
+                        id=squad_id,
+                        geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
+                        heading=heading,
+                        status="active",
+                        updated_at=now,
+                    )
+                    session.add(map_ent)
+
+                user_stmt = select(User).where(User.id == squad_id)
+                user_res = await session.execute(user_stmt)
+                user_obj = user_res.scalar_one_or_none()
+                if user_obj and user_obj.area != area:
+                    user_obj.area = area
+
+                await session.commit()
+        except Exception as e:
+            print(f"[SIMULATOR DB ERROR] Error updating squad location: {e}")
+        finally:
+            self._db_save_in_flight.discard(key)
+
+    async def _persist_drone_coords(
+        self,
+        threat_id: UUID,
+        lat: float,
+        lon: float,
+        altitude: float,
+        now: datetime,
+    ):
+        key = f"drone_{threat_id}"
+        self._db_save_in_flight.add(key)
+        try:
+            async with async_session_maker() as session:
+                stmt = select(Threat).where(Threat.id == threat_id)
+                res = await session.execute(stmt)
+                threat = res.scalar_one_or_none()
+                if threat and threat.status == "active":
+                    threat.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                    threat.altitude = altitude
+                    threat.updated_at = now
+                    await session.commit()
+        except Exception as e:
+            print(f"[SIMULATOR DB ERROR] Error updating drone location: {e}")
+        finally:
+            self._db_save_in_flight.discard(key)
+
     async def update_squad_location(
         self,
         squad_id: UUID,
         lat: float,
         lon: float,
         heading: float,
+        force_db: bool = False,
     ):
         """
         Pushes real-time squad telemetry via WebSockets and checks for threat breaches.
+        Throttles PostgreSQL persistence to prevent connection pool exhaustion.
         """
         now = datetime.now(UTC)
         area = calculate_area_from_lat(lat)
+        self._latest_squad_state[squad_id] = (lat, lon, heading, area, now)
 
         # 1. Emit squad_moved event
         payload = {
@@ -235,39 +310,16 @@ class SimulatorEngine:
                 client["area"] = area
                 await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
 
-        # 3. Persist to Postgres safely in background without blocking animation loop
-        async def _save_squad_coords():
-            try:
-                async with async_session_maker() as session:
-                    map_stmt = select(MapEntity).where(MapEntity.id == squad_id)
-                    map_res = await session.execute(map_stmt)
-                    map_ent = map_res.scalar_one_or_none()
-
-                    if map_ent:
-                        map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                        map_ent.heading = heading
-                        map_ent.updated_at = now
-                    else:
-                        map_ent = MapEntity(
-                            id=squad_id,
-                            geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                            heading=heading,
-                            status="active",
-                            updated_at=now,
-                        )
-                        session.add(map_ent)
-
-                    user_stmt = select(User).where(User.id == squad_id)
-                    user_res = await session.execute(user_stmt)
-                    user_obj = user_res.scalar_one_or_none()
-                    if user_obj and user_obj.area != area:
-                        user_obj.area = area
-
-                    await session.commit()
-            except Exception as e:
-                print(f"[SIMULATOR DB ERROR] Error updating squad location: {e}")
-
-        asyncio.create_task(_save_squad_coords())
+        # 3. Throttle Postgres persistence: max once every 3.0s per squad
+        squad_key = f"squad_{squad_id}"
+        now_ts = asyncio.get_event_loop().time()
+        if squad_key not in self._db_save_in_flight and (
+            force_db or (now_ts - self._last_db_save.get(squad_key, 0.0) >= 3.0)
+        ):
+            self._last_db_save[squad_key] = now_ts
+            asyncio.create_task(
+                self._persist_squad_coords(squad_id, lat, lon, heading, area, now)
+            )
 
     async def update_drone_location(
         self,
@@ -278,11 +330,15 @@ class SimulatorEngine:
         name: str = "Hostile UAV",
         severity: str = "critical",
         radius: float = 180.0,
+        force_db: bool = False,
     ):
         """
         Pushes real-time UAV aerial telemetry and tests proximity danger checks.
+        Throttles PostgreSQL persistence to prevent connection pool exhaustion.
         """
         now = datetime.now(UTC)
+        self._latest_drone_state[threat_id] = (lat, lon, altitude, now)
+
         payload = {
             "id": str(threat_id),
             "name": name,
@@ -298,22 +354,16 @@ class SimulatorEngine:
         }
         await broadcast_threat_event("threat_updated", payload)
 
-        # Persist to Postgres asynchronously without blocking fast animation loop
-        async def _save_drone_coords():
-            try:
-                async with async_session_maker() as session:
-                    stmt = select(Threat).where(Threat.id == threat_id)
-                    res = await session.execute(stmt)
-                    threat = res.scalar_one_or_none()
-                    if threat and threat.status == "active":
-                        threat.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                        threat.altitude = altitude
-                        threat.updated_at = now
-                        await session.commit()
-            except Exception:
-                pass
-
-        asyncio.create_task(_save_drone_coords())
+        # Throttle Postgres persistence: max once every 3.0s per drone
+        drone_key = f"drone_{threat_id}"
+        now_ts = asyncio.get_event_loop().time()
+        if drone_key not in self._db_save_in_flight and (
+            force_db or (now_ts - self._last_db_save.get(drone_key, 0.0) >= 3.0)
+        ):
+            self._last_db_save[drone_key] = now_ts
+            asyncio.create_task(
+                self._persist_drone_coords(threat_id, lat, lon, altitude, now)
+            )
 
     async def _run_squad_patrol(self, squad_username: str, squad_id: UUID, path: list, delay: float = 0.25):
         """
@@ -539,7 +589,7 @@ class SimulatorEngine:
 
     async def stop(self) -> dict[str, Any]:
         """
-        Gracefully stops all simulation tasks.
+        Gracefully stops all simulation tasks and flushes final resting coordinates to DB.
         """
         for name, task in list(self._tasks.items()):
             task.cancel()
@@ -548,6 +598,20 @@ class SimulatorEngine:
         self._tasks.clear()
         self._is_running = False
         self._current_mode = "stopped"
+
+        # Final DB flush so resting coordinates are saved
+        flush_tasks = []
+        for squad_id, (lat, lon, heading, area, now) in list(self._latest_squad_state.items()):
+            flush_tasks.append(
+                self._persist_squad_coords(squad_id, lat, lon, heading, area, now)
+            )
+        for threat_id, (lat, lon, altitude, now) in list(self._latest_drone_state.items()):
+            flush_tasks.append(
+                self._persist_drone_coords(threat_id, lat, lon, altitude, now)
+            )
+        if flush_tasks:
+            await asyncio.gather(*flush_tasks, return_exceptions=True)
+
         return self.get_status()
 
     async def manual_step(
@@ -582,7 +646,7 @@ class SimulatorEngine:
 
             new_lat = curr_lat + d_lat
             new_lon = curr_lon + d_lon
-            await self.update_squad_location(target_id, new_lat, new_lon, heading)
+            await self.update_squad_location(target_id, new_lat, new_lon, heading, force_db=True)
             return {
                 "status": "ok",
                 "target_id": str(target_id),
@@ -608,7 +672,7 @@ class SimulatorEngine:
 
             new_lat = curr_lat + d_lat
             new_lon = curr_lon + d_lon
-            await self.update_drone_location(target_id, new_lat, new_lon, new_alt)
+            await self.update_drone_location(target_id, new_lat, new_lon, new_alt, force_db=True)
             return {
                 "status": "ok",
                 "threat_id": str(target_id),

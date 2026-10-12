@@ -31,6 +31,8 @@ _connected_clients: dict[str, dict[str, Any]] = {}
 # Active threats cache in memory for instantaneous danger zone checks without database queries
 _active_threats_cache: dict[str, dict] = {}
 _active_danger_breaches: set = set()
+_last_socket_db_save: dict[UUID, float] = {}
+_last_heartbeat_db_save: dict[UUID, float] = {}
 
 
 async def _ensure_threats_cache_loaded(session):
@@ -145,10 +147,18 @@ async def heartbeat(sid: str, data: dict):
     client = _connected_clients.get(sid)
     if not client:
         return
+    user_id = client.get("user_id")
+    if not user_id:
+        return
+
+    now_ts = asyncio.get_event_loop().time()
+    if now_ts - _last_heartbeat_db_save.get(user_id, 0.0) < 30.0:
+        return
+    _last_heartbeat_db_save[user_id] = now_ts
 
     try:
         async with async_session_maker() as session:
-            stmt = select(MapEntity).where(MapEntity.id == client["user_id"])
+            stmt = select(MapEntity).where(MapEntity.id == user_id)
             res = await session.execute(stmt)
             map_ent = res.scalar_one_or_none()
             if map_ent:
@@ -214,38 +224,42 @@ async def location_update(sid: str, data: dict):
     await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
 
     # Persist to Postgres safely in background without blocking real-time WebSocket telemetry
-    async def _save_squad_coords():
-        try:
-            async with async_session_maker() as session:
-                map_stmt = select(MapEntity).where(MapEntity.id == target_id)
-                map_res = await session.execute(map_stmt)
-                map_ent = map_res.scalar_one_or_none()
+    now_ts = asyncio.get_event_loop().time()
+    if now_ts - _last_socket_db_save.get(target_id, 0.0) >= 3.0:
+        _last_socket_db_save[target_id] = now_ts
 
-                if map_ent:
-                    map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                    map_ent.heading = heading
-                    map_ent.updated_at = now
-                else:
-                    map_ent = MapEntity(
-                        id=target_id,
-                        geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                        heading=heading,
-                        status="active",
-                        updated_at=now,
-                    )
-                    session.add(map_ent)
+        async def _save_squad_coords():
+            try:
+                async with async_session_maker() as session:
+                    map_stmt = select(MapEntity).where(MapEntity.id == target_id)
+                    map_res = await session.execute(map_stmt)
+                    map_ent = map_res.scalar_one_or_none()
 
-                user_stmt = select(User).where(User.id == target_id)
-                user_res = await session.execute(user_stmt)
-                user_obj = user_res.scalar_one_or_none()
-                if user_obj and user_obj.area != new_area:
-                    user_obj.area = new_area
+                    if map_ent:
+                        map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                        map_ent.heading = heading
+                        map_ent.updated_at = now
+                    else:
+                        map_ent = MapEntity(
+                            id=target_id,
+                            geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
+                            heading=heading,
+                            status="active",
+                            updated_at=now,
+                        )
+                        session.add(map_ent)
 
-                await session.commit()
-        except Exception as e:
-            print(f"[SOCKET DB ERROR] Error updating squad location in db: {e}")
+                    user_stmt = select(User).where(User.id == target_id)
+                    user_res = await session.execute(user_stmt)
+                    user_obj = user_res.scalar_one_or_none()
+                    if user_obj and user_obj.area != new_area:
+                        user_obj.area = new_area
 
-    asyncio.create_task(_save_squad_coords())
+                    await session.commit()
+            except Exception as e:
+                print(f"[SOCKET DB ERROR] Error updating squad location in db: {e}")
+
+        asyncio.create_task(_save_squad_coords())
 
 
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
