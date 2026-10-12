@@ -25,6 +25,9 @@ class UserCreate(UserBase):
     lat: float | None = Field(None, ge=29.0, le=34.0)
     lon: float | None = Field(None, ge=33.5, le=36.5)
     soldiers: list[SoldierCreate] | None = None
+    soldier_ids: list[str] | None = Field(
+        None, description="List of existing unassigned 7-digit soldier military IDs to assign to this unit/center"
+    )
 
 
 class UserUpdate(BaseModel):
@@ -36,6 +39,9 @@ class UserUpdate(BaseModel):
     password: str | None = Field(None, min_length=6)
     lat: float | None = Field(None, ge=29.0, le=34.0)
     lon: float | None = Field(None, ge=33.5, le=36.5)
+    soldier_ids: list[str] | None = Field(
+        None, description="List of existing unassigned 7-digit soldier military IDs to assign to this unit"
+    )
 
 
 class UserStatusUpdate(BaseModel):

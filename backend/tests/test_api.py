@@ -451,3 +451,77 @@ async def test_soldiers_crud_and_attribution():
         assert created_data["created_by_soldier_name"] == "David Cohen"
         assert created_data["created_by_unit_name"] == "Main Command Center"
 
+
+@pytest.mark.asyncio
+async def test_command_center_soldier_assignment_and_unassigned():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Login as Admin
+        admin_login = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        # 1. Create an unassigned soldier in registry
+        soldier_payload = {
+            "id": "8888001",
+            "name": "Yoni Net",
+            "role": "communications",
+        }
+        create_soldier_res = await client.post("/api/v1/admin/soldiers", json=soldier_payload, headers=headers)
+        assert create_soldier_res.status_code == 201
+
+        # 2. Query unassigned soldiers list
+        unassigned_res = await client.get("/api/v1/admin/soldiers/unassigned", headers=headers)
+        assert unassigned_res.status_code == 200
+        unassigned_list = unassigned_res.json()
+        assert any(s["id"] == "8888001" for s in unassigned_list)
+
+        # 3. Also query via query parameter ?unassigned=true
+        param_res = await client.get("/api/v1/admin/soldiers?unassigned=true", headers=headers)
+        assert param_res.status_code == 200
+        assert any(s["id"] == "8888001" for s in param_res.json())
+
+        # 4. Attempt to create AreaCommandCenter without any soldiers -> 422
+        bad_center = await client.post(
+            "/api/v1/admin/users",
+            json={
+                "username": "center_empty",
+                "name": "Southern Regional Command",
+                "password": "password123",
+                "role": "AreaCommandCenter",
+                "area": "South",
+                "lat": 31.25,
+                "lon": 34.79,
+            },
+            headers=headers,
+        )
+        assert bad_center.status_code == 422
+        assert "At least one soldier is required" in bad_center.json()["error"]["message"]
+
+        # 5. Create AreaCommandCenter assigning the unassigned soldier
+        good_center = await client.post(
+            "/api/v1/admin/users",
+            json={
+                "username": "center_south_test",
+                "name": "Southern Regional Command",
+                "password": "password123",
+                "role": "AreaCommandCenter",
+                "area": "South",
+                "lat": 31.25,
+                "lon": 34.79,
+                "soldier_ids": ["8888001"],
+            },
+            headers=headers,
+        )
+        assert good_center.status_code == 201
+        created_user = good_center.json()
+        assert any(s["id"] == "8888001" for s in created_user.get("soldiers", []))
+
+        # 6. Verify soldier is no longer in unassigned list
+        unassigned_res_after = await client.get("/api/v1/admin/soldiers/unassigned", headers=headers)
+        assert unassigned_res_after.status_code == 200
+        assert not any(s["id"] == "8888001" for s in unassigned_res_after.json())
+
+
