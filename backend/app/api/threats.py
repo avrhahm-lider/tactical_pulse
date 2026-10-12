@@ -30,10 +30,8 @@ async def list_threats(
     current_user: User = Depends(get_current_user),
 ):
     caller_coords = await get_caller_coordinates(session, current_user.id)
-    stmt = await get_visible_threats_query(current_user, caller_coords)
+    stmt = await get_visible_threats_query(current_user, caller_coords, status_filter=status_filter)
 
-    if status_filter:
-        stmt = stmt.where(Threat.status == status_filter)
     if engagement_status:
         stmt = stmt.where(Threat.engagement_status == engagement_status)
     if threat_type:
@@ -43,27 +41,7 @@ async def list_threats(
     result = await session.execute(stmt)
     rows = result.all()
 
-    return [
-        ThreatResponse(
-            id=t.id,
-            name=t.name,
-            description=t.description,
-            threat_type=t.threat_type,
-            type=t.type,
-            severity_level=t.severity_level,
-            engagement_status=t.engagement_status,
-            assigned_to_id=t.assigned_to_id,
-            radius=t.radius,
-            lat=lat,
-            lon=lon,
-            altitude=t.altitude,
-            status=t.status,
-            created_by_id=t.created_by_id,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
-        )
-        for t, lat, lon in rows
-    ]
+    return [ThreatResponse.from_threat(t, lat, lon) for t, lat, lon in rows]
 
 
 @router.post("", response_model=ThreatResponse, status_code=status.HTTP_201_CREATED)
@@ -121,25 +99,11 @@ async def create_threat(
     await session.commit()
     await session.refresh(new_threat)
 
-    resp = ThreatResponse(
-        id=new_threat.id,
-        name=new_threat.name,
-        description=new_threat.description,
-        threat_type=new_threat.threat_type,
-        type=new_threat.type,
-        severity_level=new_threat.severity_level,
-        engagement_status=new_threat.engagement_status,
-        assigned_to_id=new_threat.assigned_to_id,
-        radius=new_threat.radius,
-        lat=req.lat,
-        lon=req.lon,
-        altitude=new_threat.altitude,
-        status=new_threat.status,
-        created_by_id=new_threat.created_by_id,
-        created_at=new_threat.created_at,
-        updated_at=new_threat.updated_at,
-    )
-    await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
+    resp = ThreatResponse.from_threat(new_threat, req.lat, req.lon)
+    try:
+        await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
+    except Exception as e:
+        print(f"[SOCKET WARNING] Broadcast threat_created failed: {e}")
     return resp
 
 
@@ -306,6 +270,12 @@ async def update_threat(
                 code="INVALID_REQUEST",
                 message="Altitude can only be specified for aerial drone threats",
             )
+        if current_user.role not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
+            raise AppException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="FORBIDDEN",
+                message="Only Radar or Command Center can update aerial drone telemetry",
+            )
         threat.altitude = req.altitude
 
     # 5. Lifecycle Deactivation
@@ -358,23 +328,9 @@ async def update_threat(
     await session.commit()
     await session.refresh(threat)
 
-    resp = ThreatResponse(
-        id=threat.id,
-        name=threat.name,
-        description=threat.description,
-        threat_type=threat.threat_type,
-        type=threat.type,
-        severity_level=threat.severity_level,
-        engagement_status=threat.engagement_status,
-        assigned_to_id=threat.assigned_to_id,
-        radius=threat.radius,
-        lat=new_lat,
-        lon=new_lon,
-        altitude=threat.altitude,
-        status=threat.status,
-        created_by_id=threat.created_by_id,
-        created_at=threat.created_at,
-        updated_at=threat.updated_at,
-    )
-    await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+    resp = ThreatResponse.from_threat(threat, new_lat, new_lon)
+    try:
+        await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+    except Exception as e:
+        print(f"[SOCKET WARNING] Broadcast threat_updated failed: {e}")
     return resp

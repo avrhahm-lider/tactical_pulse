@@ -39,28 +39,14 @@ async def list_all_users(
     result = await session.execute(stmt)
     rows = result.all()
 
-    admin_users = []
-    for user_obj, lat, lon in rows:
-        soldiers_list = [
-            SoldierResponse(id=s.id, name=s.name, role=s.role)
-            for s in user_obj.soldiers
-        ]
-        admin_users.append(
-            AdminUserResponse(
-                id=user_obj.id,
-                username=user_obj.username,
-                role=user_obj.role,
-                area=user_obj.area,
-                name=user_obj.name,
-                description=user_obj.description,
-                status=user_obj.status,
-                lat=lat,
-                lon=lon,
-                soldiers=soldiers_list,
-                created_at=user_obj.created_at,
-            )
+    return [
+        AdminUserResponse(
+            id=u.id, username=u.username, role=u.role, area=u.area, name=u.name,
+            description=u.description, status=u.status, lat=lat, lon=lon,
+            soldiers=u.soldiers, created_at=u.created_at,
         )
-    return admin_users
+        for u, lat, lon in rows
+    ]
 
 
 @router.post("/users", response_model=AdminUserResponse, status_code=status.HTTP_201_CREATED)
@@ -89,7 +75,7 @@ async def create_user_or_unit(
     if req.role in ["Squad", "SapperSquad"]:
         if not req.soldiers or len(req.soldiers) == 0:
             raise AppException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 code="VALIDATION_ERROR",
                 message="Soldier roster is required for field combat squads",
             )
@@ -98,12 +84,31 @@ async def create_user_or_unit(
         if has_sapper:
             assigned_role = "SapperSquad"
 
+    # Validate soldier uniqueness if soldiers are provided
+    if req.soldiers:
+        soldier_ids = [s.id for s in req.soldiers]
+        if len(soldier_ids) != len(set(soldier_ids)):
+            raise AppException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                code="VALIDATION_ERROR",
+                message="Duplicate soldier IDs found in submitted roster",
+            )
+        existing_soldier_stmt = select(Soldier.id).where(Soldier.id.in_(soldier_ids))
+        existing_soldier_res = await session.execute(existing_soldier_stmt)
+        conflict_soldier_ids = existing_soldier_res.scalars().all()
+        if conflict_soldier_ids:
+            raise AppException(
+                status_code=status.HTTP_409_CONFLICT,
+                code="CONFLICT",
+                message=f"Soldier military ID(s) already registered: {', '.join(conflict_soldier_ids)}",
+            )
+
     # Field units require initial coordinates
     is_field_unit = assigned_role in ["Squad", "SapperSquad", "Radar"]
     if is_field_unit:
         if req.lat is None or req.lon is None:
             raise AppException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 code="VALIDATION_ERROR",
                 message="Coordinates (lat, lon) are strictly required for tactical field units",
             )
@@ -116,7 +121,7 @@ async def create_user_or_unit(
                 assigned_area = calculate_area_from_lat(req.lat)
             else:
                 raise AppException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     code="VALIDATION_ERROR",
                     message="Area must be specified for AreaCommandCenter (North, Center, South)",
                 )
@@ -134,20 +139,15 @@ async def create_user_or_unit(
     await session.flush()
 
     # Add soldiers if provided
-    soldiers_created = []
-    if req.soldiers:
-        for s_in in req.soldiers:
-            soldier = Soldier(
-                id=s_in.id,
-                user_id=new_user.id,
-                name=s_in.name,
-                role=s_in.role,
-            )
-            session.add(soldier)
-            soldiers_created.append(soldier)
+    soldiers_created = [
+        Soldier(id=s.id, user_id=new_user.id, name=s.name, role=s.role)
+        for s in req.soldiers
+    ] if req.soldiers else []
+    if soldiers_created:
+        session.add_all(soldiers_created)
 
-    # Automatically create initial map_entity for field units
-    if is_field_unit and req.lat is not None and req.lon is not None:
+    # Automatically create initial map_entity for field units or regional command centers
+    if (is_field_unit or assigned_role == "AreaCommandCenter") and req.lat is not None and req.lon is not None:
         map_ent = MapEntity(
             id=new_user.id,
             geom=WKTElement(f"POINT({req.lon} {req.lat})", srid=4326),
@@ -169,20 +169,10 @@ async def create_user_or_unit(
     await session.refresh(new_user)
 
     return AdminUserResponse(
-        id=new_user.id,
-        username=new_user.username,
-        role=new_user.role,
-        area=new_user.area,
-        name=new_user.name,
-        description=new_user.description,
-        status=new_user.status,
-        lat=req.lat,
-        lon=req.lon,
-        soldiers=[
-            SoldierResponse(id=s.id, name=s.name, role=s.role)
-            for s in soldiers_created
-        ],
-        created_at=new_user.created_at,
+        id=new_user.id, username=new_user.username, role=new_user.role,
+        area=new_user.area, name=new_user.name, description=new_user.description,
+        status=new_user.status, lat=req.lat, lon=req.lon,
+        soldiers=soldiers_created, created_at=new_user.created_at,
     )
 
 
@@ -207,6 +197,13 @@ async def update_user_status(
             message=f"Unit with ID '{user_id}' not found",
         )
 
+    if user.id == current_admin.id and req.status == "inactive":
+        raise AppException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_REQUEST",
+            message="Cannot deactivate your own administrator account",
+        )
+
     user.status = req.status
 
     # Also update map_entity status if present
@@ -229,6 +226,9 @@ async def update_user_status(
     await session.commit()
     await session.refresh(user)
 
-    await broadcast_unit_status_changed(str(user.id), req.status)
+    try:
+        await broadcast_unit_status_changed(str(user.id), req.status)
+    except Exception as e:
+        print(f"[SOCKET WARNING] Broadcast unit_status_changed failed: {e}")
 
     return UserResponse.model_validate(user)

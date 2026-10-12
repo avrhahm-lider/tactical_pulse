@@ -221,3 +221,105 @@ async def test_map_snapshot():
         assert "threats" in snapshot
         assert len(snapshot["squads"]) >= 3
         assert len(snapshot["threats"]) >= 2
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_self_deactivate():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        admin_data = login_res.json()
+        admin_id = admin_data["user"]["id"]
+        headers = {"Authorization": f"Bearer {admin_data['access_token']}"}
+
+        deactivate_res = await client.patch(
+            f"/api/v1/admin/users/{admin_id}/status",
+            json={"status": "inactive"},
+            headers=headers,
+        )
+        assert deactivate_res.status_code == 400
+        assert deactivate_res.json()["error"]["code"] == "INVALID_REQUEST"
+
+
+@pytest.mark.asyncio
+async def test_soldier_duplicate_id_protection():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+        # 1. Duplicate within same payload
+        payload_internal_dup = {
+            "username": "squad_dup_internal",
+            "password": "password123",
+            "role": "Squad",
+            "name": "Dup Squad",
+            "lat": 32.2,
+            "lon": 34.8,
+            "soldiers": [
+                {"id": "8888001", "name": "Soldier A", "role": "rifleman"},
+                {"id": "8888001", "name": "Soldier B", "role": "medic"},
+            ],
+        }
+        res_dup = await client.post("/api/v1/admin/users", json=payload_internal_dup, headers=headers)
+        assert res_dup.status_code == 422
+
+        # 2. Duplicate with already existing soldier (e.g. 1000001 from Golani)
+        payload_existing_dup = {
+            "username": "squad_dup_existing",
+            "password": "password123",
+            "role": "Squad",
+            "name": "Dup Existing Squad",
+            "lat": 32.2,
+            "lon": 34.8,
+            "soldiers": [
+                {"id": "1000001", "name": "Existing Soldier", "role": "rifleman"},
+            ],
+        }
+        res_existing = await client.post("/api/v1/admin/users", json=payload_existing_dup, headers=headers)
+        assert res_existing.status_code == 409
+        assert res_existing.json()["error"]["code"] == "CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_drone_altitude_rbac_protection():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Login as regular squad (squad_golani)
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "squad_golani", "password": "squad123"},
+        )
+        headers = {"Authorization": f"Bearer {login_res.json()['access_token']}"}
+
+        # Query threats to find the demo drone
+        threats_res = await client.get("/api/v1/threats", headers=headers)
+        assert threats_res.status_code == 200
+
+        # Login as radar to get demo drone id
+        radar_login = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "radar_post_1", "password": "radar123"},
+        )
+        radar_headers = {"Authorization": f"Bearer {radar_login.json()['access_token']}"}
+        drone_res = await client.get("/api/v1/threats?threat_type=drone", headers=radar_headers)
+        assert drone_res.status_code == 200
+        drones = drone_res.json()
+        assert len(drones) >= 1
+        drone_id = drones[0]["id"]
+
+        # Regular squad attempts to update drone altitude -> FORBIDDEN
+        patch_res = await client.patch(
+            f"/api/v1/threats/{drone_id}",
+            json={"altitude": 600.0},
+            headers=headers,
+        )
+        assert patch_res.status_code == 403
+        assert patch_res.json()["error"]["code"] == "FORBIDDEN"
+

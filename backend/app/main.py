@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -10,8 +11,16 @@ from app.core.errors import (
     http_exception_handler,
     validation_exception_handler,
 )
+from app.db.postgres import init_db
 from app.api import auth, admin, threats, map as tactical_map
 from app.sockets.server import sio
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+
 
 # Initialize FastAPI application
 fastapi_app = FastAPI(
@@ -19,6 +28,7 @@ fastapi_app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Exception handlers matching API_CONTRACT.md Section 5 unified format

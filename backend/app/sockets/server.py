@@ -32,6 +32,27 @@ _active_threats_cache: Dict[str, dict] = {}
 _active_danger_breaches: set = set()
 
 
+async def _ensure_threats_cache_loaded(session):
+    global _active_threats_cache
+    if not _active_threats_cache:
+        threats_q = await session.execute(
+            select(Threat, ST_Y(Threat.geom), ST_X(Threat.geom)).where(Threat.status == "active")
+        )
+        for t, t_lat, t_lon in threats_q.all():
+            _active_threats_cache[str(t.id)] = {
+                "id": str(t.id),
+                "name": t.name,
+                "threat_type": t.threat_type,
+                "severity_level": t.severity_level,
+                "engagement_status": t.engagement_status,
+                "radius": t.radius,
+                "lat": t_lat,
+                "lon": t_lon,
+                "altitude": t.altitude,
+                "status": t.status,
+            }
+
+
 @sio.event
 async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
     if not auth or "token" not in auth:
@@ -49,33 +70,62 @@ async def connect(sid: str, environ: dict, auth: Optional[dict] = None):
         if not user_id_str or payload.get("type") != "access":
             return False
         user_id = UUID(user_id_str)
-        role = payload.get("role", "Squad")
-        area = payload.get("area", "Center")
     except Exception as e:
         print(f"[AUTH EXCEPTION] Invalid JWT handshake: {e}")
         return False
 
+    # Enforce active user status and fetch initial coordinates from DB
+    try:
+        async with async_session_maker() as session:
+            stmt = (
+                select(
+                    User,
+                    ST_Y(MapEntity.geom).label("lat"),
+                    ST_X(MapEntity.geom).label("lon"),
+                )
+                .outerjoin(MapEntity, MapEntity.id == User.id)
+                .where(User.id == user_id)
+            )
+            res = await session.execute(stmt)
+            row = res.first()
+            if not row:
+                return False
+            user_obj, initial_lat, initial_lon = row
+            if user_obj.status != "active":
+                return False
+
+            role = user_obj.role
+            area = user_obj.area
+            user_name = user_obj.name or user_obj.username
+
+            await _ensure_threats_cache_loaded(session)
+    except Exception as e:
+        print(f"[AUTH EXCEPTION] Database verification failed during socket connect: {e}")
+        return False
+
     client_info = {
         "user_id": user_id,
-        "username": payload.get("name") or payload.get("username") or str(user_id),
+        "username": user_name,
         "role": role,
         "area": area,
-        "lat": None,
-        "lon": None,
+        "lat": initial_lat,
+        "lon": initial_lon,
     }
     _connected_clients[sid] = client_info
 
     # Automatically join role & zone rooms after handshake completes
-    async def _join_rooms():
+    async def _post_connect_setup():
         await asyncio.sleep(0.05)
         try:
             await sio.enter_room(sid, f"role_{role}")
             if area:
                 await sio.enter_room(sid, f"zone_{area}")
+            if initial_lat is not None and initial_lon is not None:
+                await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client_info)
         except Exception:
             pass
 
-    asyncio.create_task(_join_rooms())
+    asyncio.create_task(_post_connect_setup())
     return True
 
 
@@ -192,29 +242,10 @@ async def location_update(sid: str, data: dict):
                 if user_obj:
                     user_obj.area = new_area
 
-            # Preload _active_threats_cache if empty
-            if not _active_threats_cache:
-                threats_q = await session.execute(
-                    select(Threat, ST_Y(Threat.geom), ST_X(Threat.geom)).where(Threat.status == "active")
-                )
-                for t, t_lat, t_lon in threats_q.all():
-                    _active_threats_cache[str(t.id)] = {
-                        "id": str(t.id),
-                        "name": t.name,
-                        "threat_type": t.threat_type,
-                        "severity_level": t.severity_level,
-                        "engagement_status": t.engagement_status,
-                        "radius": t.radius,
-                        "lat": t_lat,
-                        "lon": t_lon,
-                        "altitude": t.altitude,
-                        "status": t.status,
-                    }
-
+            await _ensure_threats_cache_loaded(session)
             await session.commit()
-    except Exception:
-        # Prevent database session spikes from interrupting real-time location stream
-        pass
+    except Exception as e:
+        print(f"[SOCKET DB ERROR] Error updating location in db: {e}")
 
 
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -321,6 +352,11 @@ async def broadcast_to_visibility_range(
         elif role == "AreaCommandCenter" and area == origin_area:
             await sio.emit(event_name, payload, room=client_sid)
         elif role in ["Squad", "SapperSquad", "Radar"]:
+            # Radar stations monitor aerial drones anywhere across Israeli airspace
+            if role == "Radar" and payload.get("threat_type") == "drone":
+                await sio.emit(event_name, payload, room=client_sid)
+                continue
+
             client_lat = info.get("lat")
             client_lon = info.get("lon")
             if client_lat is not None and client_lon is not None:
@@ -359,6 +395,18 @@ async def broadcast_threat_event(event_name: str, threat_dict: dict):
         await check_and_broadcast_danger_alerts(threat_dict=threat_dict)
 
 
+async def disconnect_user_sockets(user_id: str):
+    """Disconnects all active socket connections belonging to the specified user."""
+    for sid, client in list(_connected_clients.items()):
+        if str(client.get("user_id")) == str(user_id):
+            try:
+                await sio.disconnect(sid)
+            except Exception:
+                pass
+
+
 async def broadcast_unit_status_changed(unit_id: str, status: str):
     await sio.emit("unit_status_changed", {"id": str(unit_id), "status": status})
+    if status == "inactive":
+        await disconnect_user_sockets(str(unit_id))
 

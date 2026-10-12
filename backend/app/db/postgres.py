@@ -24,20 +24,13 @@ Base = declarative_base()
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session_maker() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+        yield session
 
 
 async def init_db() -> None:
-    import app.models.user  # noqa: F401
-    import app.models.soldier  # noqa: F401
-    import app.models.map_entity  # noqa: F401
-    import app.models.threat  # noqa: F401
-    import app.models.audit_log  # noqa: F401
-    import app.models.message  # noqa: F401
+    import app.models  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
 

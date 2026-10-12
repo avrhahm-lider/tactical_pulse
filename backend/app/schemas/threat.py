@@ -19,17 +19,22 @@ class ThreatBase(BaseModel):
 
 
 class ThreatCreate(ThreatBase):
-    type: ThreatType
+    type: Optional[ThreatType] = None
     lat: float = Field(..., ge=29.0, le=34.0)
     lon: float = Field(..., ge=33.5, le=36.5)
     altitude: Optional[float] = Field(None, ge=0.0)
 
     @model_validator(mode="after")
     def validate_type_consistency(self):
-        if self.threat_type == "explosive" and self.type != "immovable":
+        if self.type is None:
+            self.type = "immovable" if self.threat_type == "explosive" else "movable"
+        elif self.threat_type == "explosive" and self.type != "immovable":
             raise ValueError("Explosive threat MUST have type 'immovable'")
-        if self.threat_type in ["vehicle", "drone", "personnel"] and self.type != "movable":
+        elif self.threat_type in ["vehicle", "drone", "personnel"] and self.type != "movable":
             raise ValueError(f"Threat category '{self.threat_type}' MUST have type 'movable'")
+
+        if self.threat_type != "drone" and self.altitude is not None:
+            self.altitude = None
         return self
 
 
@@ -57,6 +62,26 @@ class ThreatResponse(ThreatBase):
     status: ThreatStatus
     created_by_id: UUID
     created_at: datetime
-    updated_at: datetime
-
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_threat(cls, threat, lat: float, lon: float) -> "ThreatResponse":
+        return cls(
+            id=threat.id,
+            name=threat.name,
+            description=threat.description,
+            threat_type=threat.threat_type,
+            type=threat.type,
+            severity_level=threat.severity_level,
+            engagement_status=threat.engagement_status,
+            assigned_to_id=threat.assigned_to_id,
+            radius=threat.radius,
+            lat=lat,
+            lon=lon,
+            altitude=threat.altitude,
+            status=threat.status,
+            created_by_id=threat.created_by_id,
+            created_at=threat.created_at,
+            updated_at=threat.updated_at,
+        )
+

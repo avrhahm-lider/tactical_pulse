@@ -24,16 +24,26 @@ from app.core.security import (
 from app.core.errors import AppException
 from app.services.audit import log_audit_event
 from app.api.dependencies import get_current_user
+from app.sockets.server import disconnect_user_sockets
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-# In-memory rate limiting and account locking tracker:
+def _user_claims(u: User) -> dict:
+    return {"role": u.role, "area": u.area, "username": u.username, "name": u.name}
+
+
 # key: (username, ip) -> (failure_count, last_attempt_time, locked_until_time)
 _login_attempts: Dict[Tuple[str, str], Tuple[int, float, float]] = {}
 
 
 def check_rate_limit(username: str, client_ip: str) -> None:
     now = time.time()
+    # Prune stale tracking keys if cache exceeds threshold to avoid unbounded memory growth
+    if len(_login_attempts) > 1000:
+        stale_keys = [k for k, (_, last_t, _) in _login_attempts.items() if now - last_t > 3600.0]
+        for k in stale_keys:
+            _login_attempts.pop(k, None)
+
     key = (username, client_ip)
     if key in _login_attempts:
         failures, last_attempt, locked_until = _login_attempts[key]
@@ -114,13 +124,7 @@ async def login(
 
     record_successful_attempt(req.username, client_ip)
 
-    extra_claims = {
-        "role": user.role,
-        "area": user.area,
-        "username": user.username,
-        "name": user.name,
-    }
-    access_token = create_access_token(subject=str(user.id), extra_claims=extra_claims)
+    access_token = create_access_token(subject=str(user.id), extra_claims=_user_claims(user))
     refresh_token = create_refresh_token(subject=str(user.id))
 
     await log_audit_event(
@@ -179,13 +183,7 @@ async def refresh_token_endpoint(
             message="User associated with refresh token is invalid or inactive",
         )
 
-    extra_claims = {
-        "role": user.role,
-        "area": user.area,
-        "username": user.username,
-        "name": user.name,
-    }
-    new_access_token = create_access_token(subject=str(user.id), extra_claims=extra_claims)
+    new_access_token = create_access_token(subject=str(user.id), extra_claims=_user_claims(user))
     new_refresh_token = create_refresh_token(subject=str(user.id))
 
     await log_audit_event(
@@ -222,4 +220,11 @@ async def logout(
         ip_address=client_ip,
     )
     await session.commit()
+
+    # Invalidate and disconnect any active WebSockets for this user
+    try:
+        await disconnect_user_sockets(str(current_user.id))
+    except Exception as e:
+        print(f"[SOCKET WARNING] Disconnecting sockets on logout failed: {e}")
+
     return MessageResponse(message="Logged out successfully")

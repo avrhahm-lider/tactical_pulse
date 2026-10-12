@@ -34,13 +34,9 @@ def calculate_area_from_lat(lat: float) -> str:
 
 def is_lat_in_area(lat: float, area: str) -> bool:
     """Checks whether a given latitude falls within the specified theater sector."""
-    if area == "North":
-        return lat >= settings.LAT_NORTH_MIN
-    elif area == "Center":
-        return settings.LAT_CENTER_MIN <= lat < settings.LAT_NORTH_MIN
-    elif area == "South":
-        return settings.LAT_MIN <= lat < settings.LAT_CENTER_MIN
-    return True
+    if area == "Global":
+        return True
+    return calculate_area_from_lat(lat) == area
 
 
 def get_zone_clause_for_geom(geom_column, area: str):
@@ -51,7 +47,7 @@ def get_zone_clause_for_geom(geom_column, area: str):
     elif area == "Center":
         return and_(lat_expr >= settings.LAT_CENTER_MIN, lat_expr < settings.LAT_NORTH_MIN)
     elif area == "South":
-        return and_(lat_expr >= settings.LAT_MIN, lat_expr < settings.LAT_CENTER_MIN)
+        return lat_expr < settings.LAT_CENTER_MIN
     return None
 
 
@@ -110,18 +106,24 @@ async def get_visible_squads_query(caller: User, caller_coords: Optional[Tuple[f
     return stmt
 
 
-async def get_visible_threats_query(caller: User, caller_coords: Optional[Tuple[float, float]]):
+async def get_visible_threats_query(
+    caller: User,
+    caller_coords: Optional[Tuple[float, float]],
+    status_filter: Optional[str] = "active",
+):
     """
-    Builds SQL query for active threats visible to caller:
-    - MainCommandCenter: all active threats
-    - AreaCommandCenter: active threats in its assigned zone
-    - Field units: active threats within 20 km
+    Builds SQL query for threats visible to caller:
+    - MainCommandCenter: all visible threats
+    - AreaCommandCenter: visible threats in its assigned zone
+    - Field units: visible threats within 20 km (Radar tracks aerial drones globally)
     """
     stmt = select(
         Threat,
         ST_Y(Threat.geom).label("lat"),
         ST_X(Threat.geom).label("lon"),
-    ).where(Threat.status == "active")
+    )
+    if status_filter and status_filter != "all":
+        stmt = stmt.where(Threat.status == status_filter)
 
     if caller.role == "MainCommandCenter":
         return stmt
