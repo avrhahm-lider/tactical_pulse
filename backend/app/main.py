@@ -12,7 +12,7 @@ from app.core.errors import (
     validation_exception_handler,
 )
 from app.db.postgres import init_db
-from app.api import auth, admin, threats, map as tactical_map
+from app.api import auth, admin, threats, map as tactical_map, simulator
 from app.sockets.server import sio
 
 
@@ -50,6 +50,7 @@ fastapi_app.include_router(auth.router, prefix=settings.API_V1_STR)
 fastapi_app.include_router(admin.router, prefix=settings.API_V1_STR)
 fastapi_app.include_router(threats.router, prefix=settings.API_V1_STR)
 fastapi_app.include_router(tactical_map.router, prefix=settings.API_V1_STR)
+fastapi_app.include_router(simulator.router, prefix=settings.API_V1_STR)
 
 
 @fastapi_app.get("/health")
