@@ -54,6 +54,10 @@ export function connectSocket(token: string, currentUserId?: string): Socket {
     useMapStore.getState().addOrUpdateThreat(payload, currentUserId)
   })
 
+  socket.on('threat_removed', (payload: { id: string }) => {
+    useMapStore.getState().removeThreat(payload.id)
+  })
+
   socket.on('danger_zone_alert', (payload: any) => {
     useMapStore.getState().addDangerZoneAlert(payload)
   })

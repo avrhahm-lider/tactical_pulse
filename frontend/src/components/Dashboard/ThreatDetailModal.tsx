@@ -35,6 +35,10 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
   const isSapper = user?.role === 'SapperSquad'
   const isRadar = user?.role === 'Radar'
 
+  const canShootDownDrone =
+    (isRadar || isRegionalTOC || user?.role === 'MainCommandCenter') &&
+    threat.engagement_status !== 'resolved'
+
   // EOD Specialist detection: Sapper squad role, or soldier with sapper role in team, or command center
   const hasEODSpecialist =
     isSapper ||
@@ -109,6 +113,7 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
         engagement_status: 'resolved',
       })
       addOrUpdateThreat(updated, user.id)
+      removeThreat(threat.id)
       onClose()
     } catch (err: unknown) {
       let msg = 'Failed to resolve threat.'
@@ -340,7 +345,7 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
           {/* DRONE THREATS: RADAR DESTROYS, REGIONAL TOC REMOVES */}
           {threat.threat_type === 'drone' ? (
             <>
-              {isRadar && threat.engagement_status !== 'resolved' && (
+              {canShootDownDrone && (
                 <button
                   onClick={handleResolve}
                   disabled={isLoading}

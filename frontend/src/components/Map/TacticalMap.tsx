@@ -196,26 +196,41 @@ function buildThreatPopupHtml(
   // Action buttons inside panel
   let actionButtonsHtml = ''
 
-  // 1. Take Responsibility (for EOD/sapper squads or units when unassigned)
-  const canTakeResp = hasEODSpecialist && threat.engagement_status === 'unassigned' && user?.role !== 'Radar'
-  if (canTakeResp) {
-    actionButtonsHtml += `
-      <button onclick="window.__tp_take_resp && window.__tp_take_resp('${threat.id}')"
-        style="width: 100%; padding: 5px 8px; margin-top: 5px; background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; color: #fbbf24; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
-        ⚡ TAKE RESPONSIBILITY
-      </button>
-    `
-  }
+  if (threat.threat_type === 'drone' || isDrone) {
+    // Drone Shootdown Action (Radar, MainCommandCenter, AreaCommandCenter)
+    const canShootDownDrone =
+      (user?.role === 'Radar' || isCommandCenter) && threat.engagement_status !== 'resolved'
+    if (canShootDownDrone) {
+      actionButtonsHtml += `
+        <button onclick="window.__tp_resolve && window.__tp_resolve('${threat.id}')"
+          style="width: 100%; padding: 5px 8px; margin-top: 5px; background: rgba(16, 185, 129, 0.25); border: 1px solid #10b981; color: #34d399; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
+          ✓ CONFIRM DRONE DESTROYED
+        </button>
+      `
+    }
+  } else {
+    // Non-drone threats: EOD actions
+    // 1. Take Responsibility (for EOD/sapper squads or units when unassigned)
+    const canTakeResp = hasEODSpecialist && threat.engagement_status === 'unassigned' && user?.role !== 'Radar'
+    if (canTakeResp) {
+      actionButtonsHtml += `
+        <button onclick="window.__tp_take_resp && window.__tp_take_resp('${threat.id}')"
+          style="width: 100%; padding: 5px 8px; margin-top: 5px; background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; color: #fbbf24; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
+          ⚡ TAKE RESPONSIBILITY
+        </button>
+      `
+    }
 
-  // 2. Neutralize / Resolve (for EOD specialist when not resolved)
-  const canNeutralize = hasEODSpecialist && threat.engagement_status !== 'resolved' && user?.role !== 'Radar'
-  if (canNeutralize) {
-    actionButtonsHtml += `
-      <button onclick="window.__tp_resolve && window.__tp_resolve('${threat.id}')"
-        style="width: 100%; padding: 5px 8px; margin-top: 4px; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
-        ✓ NEUTRALIZE / RESOLVE
-      </button>
-    `
+    // 2. Neutralize / Resolve (for EOD specialist when not resolved)
+    const canNeutralize = hasEODSpecialist && threat.engagement_status !== 'resolved' && user?.role !== 'Radar'
+    if (canNeutralize) {
+      actionButtonsHtml += `
+        <button onclick="window.__tp_resolve && window.__tp_resolve('${threat.id}')"
+          style="width: 100%; padding: 5px 8px; margin-top: 4px; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
+          ✓ NEUTRALIZE / RESOLVE
+        </button>
+      `
+    }
   }
 
   // 3. Remove / Archive Hazard (for Regional TOC or Main Command Center)
@@ -893,6 +908,7 @@ export const TacticalMap: React.FC = () => {
           engagement_status: 'resolved',
         })
         addOrUpdateThreat(updated, user.id)
+        removeThreat(threatId)
       } catch (err) {
         console.error('Failed to resolve threat:', err)
       }
@@ -936,7 +952,7 @@ export const TacticalMap: React.FC = () => {
     // Clean up markers of threats that are no longer active
     const activeThreatIds = new Set(
       Object.values(threats)
-        .filter((t) => t.status !== 'inactive')
+        .filter((t) => t.status !== 'inactive' && t.engagement_status !== 'resolved')
         .map((t) => t.id)
     )
 
@@ -951,14 +967,10 @@ export const TacticalMap: React.FC = () => {
     threatVectorsLayer?.clearLayers()
 
     Object.values(threats).forEach((threat: Threat) => {
-      if (threat.status === 'inactive') return
+      if (threat.status === 'inactive' || threat.engagement_status === 'resolved') return
 
-      let threatColor = '#ef4444' // Red for unassigned
-      if (threat.engagement_status === 'in_progress') {
-        threatColor = '#f59e0b' // Yellow for in_progress
-      } else if (threat.engagement_status === 'resolved') {
-        threatColor = '#10b981' // Green for resolved
-      }
+      // Threat color: red for unassigned, amber/yellow for in_progress
+      const threatColor = threat.engagement_status === 'in_progress' ? '#f59e0b' : '#ef4444'
 
       const isUnderIntrusion = dangerZoneAlerts.some((a) => a.threat_id === threat.id)
       const radius = threat.radius || 150

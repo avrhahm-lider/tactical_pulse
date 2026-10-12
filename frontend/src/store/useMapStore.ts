@@ -77,7 +77,9 @@ export const useMapStore = create<MapState>((set, get) => ({
 
       const threatMap: Record<string, Threat> = {}
       snapshot.threats.forEach((th) => {
-        threatMap[th.id] = th
+        if (th.status !== 'inactive' && th.engagement_status !== 'resolved') {
+          threatMap[th.id] = th
+        }
       })
 
       set({ squads: squadMap, threats: threatMap, isLoading: false })
@@ -180,7 +182,7 @@ export const useMapStore = create<MapState>((set, get) => ({
 
   addOrUpdateThreat: (threat, currentUserId) => {
     set((state) => {
-      if (threat.status === 'inactive') {
+      if (threat.status === 'inactive' || threat.engagement_status === 'resolved') {
         const threats = { ...state.threats }
         delete threats[threat.id]
         return {
@@ -201,7 +203,7 @@ export const useMapStore = create<MapState>((set, get) => ({
         const dangerRadius = threat.radius || 150.0
         const alertKey = `${squad.id}_${threat.id}`
 
-        if (dist <= dangerRadius && threat.engagement_status !== 'resolved') {
+        if (dist <= dangerRadius) {
           if (!updatedDismissedIds.includes(alertKey)) {
             const existingAlertIndex = updatedDangerAlerts.findIndex((a) => a.id === alertKey)
             const alertObj: DangerZoneAlert = {
