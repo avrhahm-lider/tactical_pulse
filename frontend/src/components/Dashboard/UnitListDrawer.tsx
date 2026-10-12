@@ -14,17 +14,12 @@ import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { api } from '../../services/api'
 import type { Squad } from '../../types'
+import { isHQOrRadar, isSquadTransmitting } from '../../utils/squadUtils'
 
 interface UnitListDrawerProps {
   isOpen: boolean
   onClose: () => void
   initialTab?: 'units' | 'alerts'
-}
-
-function isStale(updatedAt?: string): boolean {
-  if (!updatedAt) return false
-  const diffMs = Date.now() - new Date(updatedAt).getTime()
-  return diffMs > 60000
 }
 
 export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
@@ -46,7 +41,8 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
   }, [initialTab, isOpen])
 
   const isMainAdmin = user?.role === 'MainCommandCenter'
-  const squadList = Object.values(squads)
+  // Exclude static Headquarters and Radar installations
+  const squadList = Object.values(squads).filter((sq) => !isHQOrRadar(sq))
   const activeThreatList = Object.values(threats).filter(
     (t) => t.status === 'active' && t.engagement_status !== 'resolved'
   )
@@ -138,7 +134,7 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
             </div>
           ) : (
             squadList.map((sq) => {
-              const stale = isStale(sq.updated_at)
+              const isTransmitting = isSquadTransmitting(sq, user, squadList)
               const isSelected = selectedSquad?.id === sq.id
 
               return (
@@ -155,25 +151,21 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
                     <div className="flex items-center space-x-2">
                       <span
                         className={`w-2.5 h-2.5 rounded-full ${
-                          stale
-                            ? 'bg-slate-500'
-                            : 'bg-emerald-400 shadow-[0_0_8px_#10b981] animate-pulse'
+                          isTransmitting
+                            ? 'bg-emerald-400 shadow-[0_0_8px_#10b981] animate-pulse'
+                            : 'bg-slate-500'
                         }`}
                       ></span>
                       <span className="font-bold text-white">{sq.name}</span>
                     </div>
                     <span
                       className={`text-[9px] px-1.5 py-0.5 rounded border font-semibold ${
-                        sq.role === 'AreaCommandCenter'
-                          ? 'bg-purple-950/70 text-purple-300 border-purple-700 shadow-[0_0_8px_rgba(168,85,247,0.4)]'
-                          : sq.role === 'SapperSquad'
+                        sq.role === 'SapperSquad'
                           ? 'bg-amber-950/70 text-amber-300 border-amber-700'
-                          : sq.role === 'Radar'
-                          ? 'bg-cyan-950/70 text-cyan-300 border-cyan-700'
                           : 'bg-emerald-950/70 text-emerald-300 border-emerald-700'
                       }`}
                     >
-                      {sq.role === 'AreaCommandCenter' ? 'REGIONAL HQ' : sq.role}
+                      {sq.role === 'SapperSquad' ? 'SAPPER SQUAD' : 'TACTICAL SQUAD'}
                     </span>
                   </div>
 
@@ -187,10 +179,15 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
                     <span className="text-slate-500">[{sq.area}]</span>
                   </div>
 
-                  {stale && (
-                    <div className="mt-1 text-[10px] text-amber-400/90 font-semibold flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      <span>SIGNAL STALE (&gt;60s NO TELEMETRY)</span>
+                  {isTransmitting ? (
+                    <div className="mt-1 text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                      <Radio className="w-3 h-3 animate-pulse" />
+                      <span>LIVE TRANSMITTING</span>
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-500" />
+                      <span>SIGNAL STANDBY (NO TELEMETRY)</span>
                     </div>
                   )}
                 </div>

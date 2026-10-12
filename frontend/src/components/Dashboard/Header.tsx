@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useMapStore } from '../../store/useMapStore'
+import { getActiveTransmittingCount } from '../../utils/squadUtils'
 
 interface HeaderProps {
   onOpenCreateThreat: () => void
@@ -35,9 +36,8 @@ export const Header: React.FC<HeaderProps> = ({
     (t) => t.status === 'active' && t.engagement_status !== 'resolved'
   ).length
 
-  const activeSquadCount = Object.values(squads).filter(
-    (s) => s.status === 'active'
-  ).length
+  // Only count currently active & transmitting field units (excluding static headquarters and radar)
+  const activeSquadCount = getActiveTransmittingCount(squads, user)
 
   // Area badge color
   const getAreaColor = (area?: string) => {

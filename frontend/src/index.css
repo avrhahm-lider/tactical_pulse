@@ -393,23 +393,4 @@ body {
   letter-spacing: 0.08em;
 }
 
-/* 2km x 2km Tactical Grid Cell Labels (Strict 3-character format, e.g. A01, B14) */
-.grid-cell-label-icon {
-  background: transparent !important;
-  border: none !important;
-}
-
-.grid-cell-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  color: rgba(56, 189, 248, 0.7);
-  text-shadow: 0 0 4px #000000, 0 0 8px #000000;
-  pointer-events: none;
-  user-select: none;
-  text-align: center;
-  line-height: 1;
-}
-
 

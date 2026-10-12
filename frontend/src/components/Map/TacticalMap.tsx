@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
+import React, { useEffect, useRef, useMemo, useCallback } from 'react'
 import L from 'leaflet'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import type { Squad, Threat, User } from '../../types'
-import { Compass, Crosshair, Maximize2, Grid } from 'lucide-react'
+import { Crosshair, Maximize2 } from 'lucide-react'
 
 // Leaflet default icon fix
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl
@@ -77,33 +77,13 @@ const SECTOR_DEFS: Record<'North' | 'Center' | 'South', SectorConfig> = {
   },
 }
 
-// 2km x 2km Tactical Grid System
-// 1 deg lat ≈ 111.132 km -> 2 km ≈ 0.0180 deg
-// At 31.8° lat, 1 deg lon ≈ 111.132 * cos(31.8°) ≈ 94.46 km -> 2 km ≈ 0.0212 deg
-const GRID_LAT_STEP = 0.0180
-const GRID_LON_STEP = 0.0212
-
-// Extent encompassing all operational sectors of Israel
-const GRID_ORIGIN_LAT = 29.40
-const GRID_ORIGIN_LON = 34.15
-const GRID_MAX_LAT = 33.45
-const GRID_MAX_LON = 35.95
-
-const GRID_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-
-// Generates a strictly 3-character identifier (1 letter + 2 digits, e.g. A01, B14, Z99)
-function getGridCellId(rowIndex: number, colIndex: number): string {
-  const letter = GRID_LETTERS[((rowIndex % 26) + 26) % 26]
-  const num = String((((colIndex % 99) + 99) % 99) + 1).padStart(2, '0')
-  return `${letter}${num}`
-}
-
-// Check if an entity is a dynamic operational force (excluding static headquarters)
+// Check if an entity is a dynamic operational force (excluding static headquarters and radar)
 function isDynamicForce(squad: Squad): boolean {
   return (
     squad.status !== 'inactive' &&
     squad.role !== 'AreaCommandCenter' &&
-    squad.role !== 'MainCommandCenter'
+    squad.role !== 'MainCommandCenter' &&
+    squad.role !== 'Radar'
   )
 }
 
@@ -243,11 +223,8 @@ export const TacticalMap: React.FC = () => {
   const markersLayerRef = useRef<L.LayerGroup | null>(null)
   const threatsLayerRef = useRef<L.LayerGroup | null>(null)
   const zonesLayerRef = useRef<L.LayerGroup | null>(null)
-  const gridLayerRef = useRef<L.LayerGroup | null>(null)
   const pinMarkerRef = useRef<L.Marker | null>(null)
   const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
-
-  const [isGridVisible, setIsGridVisible] = useState(true)
 
   const {
     squads,
@@ -313,7 +290,6 @@ export const TacticalMap: React.FC = () => {
 
     // Layers
     zonesLayerRef.current = L.layerGroup().addTo(map)
-    gridLayerRef.current = L.layerGroup().addTo(map)
     threatsLayerRef.current = L.layerGroup().addTo(map)
     markersLayerRef.current = L.layerGroup().addTo(map)
 
@@ -322,7 +298,6 @@ export const TacticalMap: React.FC = () => {
     return () => {
       map.remove()
       mapInstanceRef.current = null
-      gridLayerRef.current = null
       squadMarkersRef.current.clear()
     }
   }, [])
@@ -565,8 +540,13 @@ export const TacticalMap: React.FC = () => {
       poly.addTo(zonesLayer)
     })
 
-    // 3. For field squads, render 20 km tactical awareness radius circle around user
-    if (user?.id && squads[user.id] && user.role !== 'MainCommandCenter' && user.role !== 'AreaCommandCenter') {
+    if (
+      user?.id &&
+      squads[user.id] &&
+      user.role !== 'MainCommandCenter' &&
+      user.role !== 'AreaCommandCenter' &&
+      user.role !== 'Radar'
+    ) {
       const mySquad = squads[user.id]
       L.circle([mySquad.lat, mySquad.lon], {
         radius: 20000,
@@ -584,99 +564,6 @@ export const TacticalMap: React.FC = () => {
         .addTo(zonesLayer)
     }
   }, [user, selectedZoneFilter, squads, canNavigateToSector, handleNavigateToSector])
-
-  // Render 2km x 2km Tactical Grid with 3-character Identifiers
-  const renderTacticalGrid = useCallback(() => {
-    const map = mapInstanceRef.current
-    const gridLayer = gridLayerRef.current
-    if (!map || !gridLayer) return
-
-    gridLayer.clearLayers()
-    if (!isGridVisible) return
-
-    const zoom = map.getZoom()
-    // Tactical grid squares visible when zoom >= 9
-    if (zoom < 9) return
-
-    const bounds = map.getBounds()
-    const south = Math.max(bounds.getSouth(), GRID_ORIGIN_LAT)
-    const north = Math.min(bounds.getNorth(), GRID_MAX_LAT)
-    const west = Math.max(bounds.getWest(), GRID_ORIGIN_LON)
-    const east = Math.min(bounds.getEast(), GRID_MAX_LON)
-
-    if (south >= north || west >= east) return
-
-    const minRow = Math.max(0, Math.floor((south - GRID_ORIGIN_LAT) / GRID_LAT_STEP) - 1)
-    const maxRow = Math.floor((north - GRID_ORIGIN_LAT) / GRID_LAT_STEP) + 1
-    const minCol = Math.max(0, Math.floor((west - GRID_ORIGIN_LON) / GRID_LON_STEP) - 1)
-    const maxCol = Math.floor((east - GRID_ORIGIN_LON) / GRID_LON_STEP) + 1
-
-    const showLabels = zoom >= 10
-
-    for (let r = minRow; r <= maxRow; r++) {
-      const cellSouth = GRID_ORIGIN_LAT + r * GRID_LAT_STEP
-      const cellNorth = cellSouth + GRID_LAT_STEP
-      if (cellNorth < south || cellSouth > north) continue
-
-      for (let c = minCol; c <= maxCol; c++) {
-        const cellWest = GRID_ORIGIN_LON + c * GRID_LON_STEP
-        const cellEast = cellWest + GRID_LON_STEP
-        if (cellEast < west || cellWest > east) continue
-
-        const cellId = getGridCellId(r, c)
-
-        L.rectangle(
-          [
-            [cellSouth, cellWest],
-            [cellNorth, cellEast],
-          ],
-          {
-            color: '#38bdf8',
-            weight: 0.8,
-            opacity: 0.25,
-            fillColor: '#00e5ff',
-            fillOpacity: 0.015,
-            interactive: false,
-          }
-        ).addTo(gridLayer)
-
-        if (showLabels) {
-          const centerLat = (cellSouth + cellNorth) / 2
-          const centerLon = (cellWest + cellEast) / 2
-
-          L.marker([centerLat, centerLon], {
-            icon: L.divIcon({
-              className: 'grid-cell-label-icon',
-              html: `<div class="grid-cell-id">${cellId}</div>`,
-              iconSize: [32, 14],
-              iconAnchor: [16, 7],
-            }),
-            interactive: false,
-          }).addTo(gridLayer)
-        }
-      }
-    }
-  }, [isGridVisible])
-
-  // Attach Tactical Grid updates to Map view movement
-  useEffect(() => {
-    const map = mapInstanceRef.current
-    if (!map) return
-
-    const handleUpdate = () => {
-      renderTacticalGrid()
-    }
-
-    map.on('moveend', handleUpdate)
-    map.on('zoomend', handleUpdate)
-
-    renderTacticalGrid()
-
-    return () => {
-      map.off('moveend', handleUpdate)
-      map.off('zoomend', handleUpdate)
-    }
-  }, [renderTacticalGrid])
 
   // Render Temporary Pin Placement Marker
   useEffect(() => {
@@ -725,115 +612,75 @@ export const TacticalMap: React.FC = () => {
     }
 
     Object.values(squads).forEach((squad: Squad) => {
-      const isHQ = squad.role === 'AreaCommandCenter'
+      // Do not display headquarters or radar on the map
+      if (
+        squad.role === 'AreaCommandCenter' ||
+        squad.role === 'MainCommandCenter' ||
+        squad.role === 'Radar'
+      ) {
+        if (squadMarkersRef.current.has(squad.id)) {
+          squadMarkersRef.current.get(squad.id)?.remove()
+          squadMarkersRef.current.delete(squad.id)
+        }
+        return
+      }
+
       const isSapper = squad.role === 'SapperSquad'
-      const isRadar = squad.role === 'Radar'
       const isMe = user?.id === squad.id
       const stale = isStale(squad.updated_at)
 
       // Styling based on role
-      let baseColor = '#10b981' // Green for Squad
-      let roleLabel = 'SQUAD'
+      let baseColor = isSapper ? '#f59e0b' : '#10b981'
+      let roleLabel = isSapper ? 'SAPPER' : 'SQUAD'
 
-      if (isHQ) {
-        baseColor = '#a855f7' // Purple for Regional Headquarters
-        roleLabel = 'REGIONAL HQ'
-      } else if (isSapper) {
-        baseColor = '#f59e0b' // Amber/Gold for Sapper
-        roleLabel = 'SAPPER'
-      } else if (isRadar) {
-        baseColor = '#00e5ff' // Cyan for Radar
-        roleLabel = 'RADAR'
-      }
-
-      if (stale && !isHQ) {
+      if (stale) {
         baseColor = '#6b7280' // Grey for stale signal
         roleLabel += ' (STALE)'
       }
 
       // Icon HTML
-      const iconWidth = isHQ ? 42 : 36
-      const iconHeight = isHQ ? 42 : 36
+      const iconWidth = 36
+      const iconHeight = 36
 
-      const iconHtml = isHQ
-        ? `
-          <div style="position: relative; width: 42px; height: 42px; cursor: pointer; pointer-events: auto;">
-            <div style="
-              width: 42px;
-              height: 42px;
-              background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
-              border: 2px solid ${isMe ? '#ffffff' : '#c084fc'};
-              border-radius: 8px;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              box-shadow: 0 0 ${isMe ? '18px #c084fc' : '12px rgba(168, 85, 247, 0.6)'};
-              transition: transform 0.2s ease;
-            ">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="#ffffff" stroke="#000000" stroke-width="1.2">
-                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-              </svg>
-            </div>
-            <div style="
-              position: absolute;
-              top: 46px;
-              left: 50%;
-              transform: translateX(-50%);
-              background: rgba(15, 10, 30, 0.95);
-              color: #ffffff;
-              font-size: 10px;
-              font-weight: 700;
-              font-family: ui-monospace, monospace;
-              padding: 2px 6px;
-              border-radius: 4px;
-              border: 1px solid #a855f7;
-              white-space: nowrap;
-              box-shadow: 0 2px 8px rgba(0,0,0,0.8);
-              pointer-events: none;
-            ">
-              ★ ${squad.name} [${squad.area} HQ]
-            </div>
+      const iconHtml = `
+        <div style="position: relative; width: 36px; height: 36px; cursor: pointer; pointer-events: auto;">
+          <div style="
+            width: 36px;
+            height: 36px;
+            background: ${baseColor};
+            border: 2px solid ${isMe ? '#ffffff' : 'rgba(255,255,255,0.7)'};
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 ${isMe ? '16px #00e5ff' : '8px ' + baseColor};
+            transform: rotate(${squad.heading || 0}deg);
+            transition: transform 0.3s ease;
+          ">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 19 21 12 17 5 21 12 2"></polygon>
+            </svg>
           </div>
-        `
-        : `
-          <div style="position: relative; width: 36px; height: 36px; cursor: pointer; pointer-events: auto;">
-            <div style="
-              width: 36px;
-              height: 36px;
-              background: ${baseColor};
-              border: 2px solid ${isMe ? '#ffffff' : 'rgba(255,255,255,0.7)'};
-              border-radius: 50%;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              box-shadow: 0 0 ${isMe ? '16px #00e5ff' : '8px ' + baseColor};
-              transform: rotate(${squad.heading || 0}deg);
-              transition: transform 0.3s ease;
-            ">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="12 2 19 21 12 17 5 21 12 2"></polygon>
-              </svg>
-            </div>
-            <div style="
-              position: absolute;
-              top: 40px;
-              left: 50%;
-              transform: translateX(-50%);
-              background: rgba(10, 15, 29, 0.9);
-              color: ${stale ? '#9ca3af' : '#ffffff'};
-              font-size: 10px;
-              font-family: ui-monospace, monospace;
-              padding: 1px 5px;
-              border-radius: 3px;
-              border: 1px solid ${baseColor};
-              white-space: nowrap;
-              pointer-events: none;
-              box-shadow: 0 2px 6px rgba(0,0,0,0.6);
-            ">
-              ${squad.name} [${roleLabel}]
-            </div>
+          <div style="
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 15, 29, 0.9);
+            color: ${stale ? '#9ca3af' : '#ffffff'};
+            font-size: 10px;
+            font-family: ui-monospace, monospace;
+            padding: 1px 5px;
+            border-radius: 3px;
+            border: 1px solid ${baseColor};
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+          ">
+            ${squad.name} [${roleLabel}]
           </div>
-        `
+        </div>
+      `
 
       const customIcon = L.divIcon({
         className: 'squad-marker-container',
@@ -842,7 +689,7 @@ export const TacticalMap: React.FC = () => {
         iconAnchor: [iconWidth / 2, iconHeight / 2],
       })
 
-      const popupHtml = buildForcePopupHtml(squad, stale && !isHQ)
+      const popupHtml = buildForcePopupHtml(squad, stale)
 
       let marker = squadMarkersRef.current.get(squad.id)
 
@@ -858,7 +705,7 @@ export const TacticalMap: React.FC = () => {
           closeButton: true,
           autoClose: false,
           closeOnClick: false,
-          offset: [0, isHQ ? -24 : -18],
+          offset: [0, -18],
         })
 
         // Unregister Leaflet's internal auto-open click handler so it doesn't conflict with our toggle
@@ -982,7 +829,7 @@ export const TacticalMap: React.FC = () => {
       {/* Map Target Container */}
       <div ref={mapContainerRef} className="w-full h-full" />
 
-      {/* Auto-Fit Range HUD Button & 2km Tactical Grid Toggle */}
+      {/* Auto-Fit Range HUD Button */}
       <div className="absolute top-4 left-4 z-[999] hud-panel px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-2 font-mono text-xs">
         <button
           onClick={() => autoAdjustView(true)}
@@ -992,52 +839,7 @@ export const TacticalMap: React.FC = () => {
           <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
           <span>AUTO-FIT VIEW</span>
         </button>
-
-        <button
-          onClick={() => setIsGridVisible((prev) => !prev)}
-          title="Toggle 2km x 2km Tactical Grid Overlay with 3-character identifiers"
-          className={`flex items-center space-x-1.5 px-2 py-1 rounded border transition-all cursor-pointer text-[11px] font-bold ${
-            isGridVisible
-              ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-[0_0_8px_rgba(0,229,255,0.3)]'
-              : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-400'
-          }`}
-        >
-          <Grid className="w-3.5 h-3.5 text-cyan-400" />
-          <span>GRID (2KM): {isGridVisible ? 'ON' : 'OFF'}</span>
-        </button>
       </div>
-
-      {/* Floating Manager Sector Switcher on Map */}
-      {user?.role === 'MainCommandCenter' && (
-        <div className="absolute top-4 right-4 z-[999] hud-panel px-3 py-2 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-1 font-mono text-xs">
-          <span className="text-[10px] text-slate-400 font-bold px-1 flex items-center gap-1">
-            <Compass className="w-3.5 h-3.5 text-cyan-400" />
-            ZONE:
-          </span>
-          {(['Global', 'North', 'Center', 'South'] as const).map((z) => {
-            const active = selectedZoneFilter === z
-            return (
-              <button
-                key={z}
-                onClick={() => setSelectedZoneFilter(z)}
-                className={`px-2 py-1 rounded text-[10px] font-bold tracking-wider transition-all cursor-pointer border ${
-                  active
-                    ? z === 'North'
-                      ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-[0_0_8px_rgba(0,229,255,0.4)]'
-                      : z === 'Center'
-                      ? 'bg-amber-950 border-amber-400 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.4)]'
-                      : z === 'South'
-                      ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.4)]'
-                      : 'bg-purple-950 border-purple-400 text-purple-300 shadow-[0_0_8px_rgba(168,85,247,0.4)]'
-                    : 'bg-slate-900/60 hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {z === 'Global' ? 'GLOBAL' : z.toUpperCase()}
-              </button>
-            )
-          })}
-        </div>
-      )}
 
       {/* Authorized Zone HUD Badge for Regional Command Centers */}
       {user?.role === 'AreaCommandCenter' && (
