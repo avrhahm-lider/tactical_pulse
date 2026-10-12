@@ -629,13 +629,14 @@ export const TacticalMap: React.FC = () => {
     }
   }, [autoAdjustView])
 
-  // Automatically adjust view signature: runs ONLY when auto-fit mode is ON and sector/objects change
+  // Automatically adjust view signature: runs ONLY when auto-fit mode is ON and sector/squads change
   const relevantSignature = useMemo(() => {
-    const points = getRelevantCoordinates(user, selectedZoneFilter, squads, threats)
+    // Exclude threats so clicking, neutralizing, or closing a threat never alters map size or view bounds
+    const points = getRelevantCoordinates(user, selectedZoneFilter, squads, {})
     return `${user?.role}_${selectedZoneFilter}_${points.length}_${points
       .map((p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`)
       .join(';')}`
-  }, [user, selectedZoneFilter, squads, threats])
+  }, [user, selectedZoneFilter, squads])
 
   const prevSignatureRef = useRef<string>('')
 
@@ -653,54 +654,26 @@ export const TacticalMap: React.FC = () => {
 
     zonesLayer.clearLayers()
 
-    const isManager = user?.role === 'MainCommandCenter'
-    const authorizedArea = user?.area as 'North' | 'Center' | 'South' | 'Global'
-
     const isFieldTeam = user?.role === 'Squad' || user?.role === 'SapperSquad'
 
-    // Operational sectors are only drawn for command centers. Field teams see only their immediate range.
+    // Operational sector dividing lines drawn for command centers. Field teams see only their immediate range.
     if (!isFieldTeam) {
-      // 1. Draw Dividing Lines (Boundary text labels removed)
+      // Draw Dividing Border Lines only (No colored frames / polygons)
       L.polyline(
         [
-          [32.7, 33.8],
-          [32.7, 36.2],
+          [32.7, 33.5],
+          [32.7, 36.5],
         ],
-        { color: '#00e5ff', weight: 1.5, dashArray: '6, 6', opacity: 0.6 }
+        { color: '#00e5ff', weight: 1.5, dashArray: '6, 6', opacity: 0.65 }
       ).addTo(zonesLayer)
 
       L.polyline(
         [
-          [31.9, 33.8],
-          [31.9, 36.2],
+          [31.9, 33.5],
+          [31.9, 36.5],
         ],
-        { color: '#f59e0b', weight: 1.5, dashArray: '6, 6', opacity: 0.6 }
+        { color: '#f59e0b', weight: 1.5, dashArray: '6, 6', opacity: 0.65 }
       ).addTo(zonesLayer)
-
-      // 2. Render Sector Boundary Polygons for command centers
-      ;(Object.keys(SECTOR_DEFS) as Array<'North' | 'Center' | 'South'>).forEach((secKey) => {
-        const sec = SECTOR_DEFS[secKey]
-        const polygonCoords: [number, number][] = [
-          [sec.minLat, sec.minLon],
-          [sec.maxLat, sec.minLon],
-          [sec.maxLat, sec.maxLon],
-          [sec.minLat, sec.maxLon],
-        ]
-
-        const isFocused = isManager && selectedZoneFilter === secKey
-        const isAuthorized = isManager || authorizedArea === secKey
-
-        const poly = L.polygon(polygonCoords, {
-          color: isAuthorized ? sec.color : '#334155',
-          weight: isFocused ? 3 : isAuthorized ? 2 : 1.2,
-          fillColor: isAuthorized ? sec.color : '#000000',
-          fillOpacity: isFocused ? 0.16 : isAuthorized ? 0.08 : 0.28,
-          dashArray: isAuthorized ? undefined : '5, 5',
-          interactive: false,
-        })
-
-        poly.addTo(zonesLayer)
-      })
     }
 
     if (
@@ -1103,18 +1076,17 @@ export const TacticalMap: React.FC = () => {
           newMarker
         )
 
-        // Custom toggle on click: clicking the icon toggles the pop-up panel (similar to team view)
+        // Custom toggle on click: clicking the icon toggles the pop-up panel (without changing map size or zoom)
         newMarker.on('click', (e) => {
           L.DomEvent.stopPropagation(e)
           newMarker.togglePopup()
-          focusRadius10km(threat.lat, threat.lon)
         })
 
         newMarker.addTo(threatsLayer)
         threatMarkersRef.current.set(threat.id, newMarker)
       }
     })
-  }, [threats, squads, dangerZoneAlerts, user, focusRadius10km])
+  }, [threats, squads, dangerZoneAlerts, user])
 
   return (
     <div className={`relative w-full h-full ${isPickingLocationOnMap ? 'cursor-crosshair' : ''}`}>
