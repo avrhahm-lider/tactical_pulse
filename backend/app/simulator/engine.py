@@ -1,14 +1,16 @@
 import asyncio
 import math
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, List
 from uuid import UUID
 from sqlalchemy import select
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
 
 from app.db.postgres import async_session_maker
+from app.core.security import hash_password
 from app.models.user import User
+from app.models.soldier import Soldier
 from app.models.map_entity import MapEntity
 from app.models.threat import Threat
 from app.schemas.threat import ThreatResponse
@@ -16,75 +18,120 @@ from app.services.spatial import calculate_area_from_lat
 from app.sockets.server import (
     broadcast_to_visibility_range,
     broadcast_threat_event,
+    _ensure_threats_cache_loaded,
 )
 
 # ==============================================================================
-# WAYPOINTS & TRAJECTORIES
+# TACTICAL SCENARIO DEFINITION (PRESENTATION GRADE)
 # ==============================================================================
 
-SQUAD_ROUTES = {
-    "squad_golani": [
-        (32.0853, 34.7818),
-        (32.0880, 34.7845),
-        (32.0915, 34.7875),
-        (32.0945, 34.7910),
-        (32.0935, 34.7945),
-        (32.0905, 34.7925),
-        (32.0875, 34.7870),
-    ],
-    "squad_paratroopers": [
-        (32.0920, 34.7890),
-        (32.0945, 34.7925),
-        (32.0970, 34.7965),
-        (32.0985, 34.8000),
-        (32.0955, 34.8025),
-        (32.0925, 34.7995),
-        (32.0905, 34.7945),
-        (32.0910, 34.7910),
-    ],
-}
+# 1. Static Ground Threats (Minefields, Ambush Points with red danger zones)
+GROUND_THREATS = [
+    {
+        "name": "Hostile Ambush Alpha",
+        "type": "movable",
+        "threat_type": "personnel",
+        "severity_level": "critical",
+        "radius": 220.0,
+        "lat": 32.0915,
+        "lon": 34.7875,
+        "description": "Camouflaged anti-tank and sniper position overlooking central intersection",
+    },
+    {
+        "name": "Minefield Perimeter Bravo",
+        "type": "immovable",
+        "threat_type": "explosive",
+        "severity_level": "high",
+        "radius": 200.0,
+        "lat": 32.0955,
+        "lon": 34.7965,
+        "description": "Dense cluster of anti-vehicle mines and concealed IED tripwires",
+    },
+]
 
+# 2. Dynamic UAV / Drone Patrol Trajectories (High-speed aerial sweep)
 DRONE_CONFIGS = [
     {
-        "name": "Hostile UAV Alpha",
+        "name": "Hostile Recon UAV Alpha",
         "severity": "critical",
-        "radius": 200.0,
+        "radius": 180.0,
+        # Tactical aerial orbit sweeping over central AO and Golani path
         "key_points": [
-            (32.0985, 34.8000, 350.0),
-            (32.1150, 34.8150, 420.0),
-            (32.1300, 34.8100, 450.0),
-            (32.1100, 34.7950, 390.0),
-            (32.0960, 34.7950, 360.0),
+            (32.0880, 34.7830, 350.0),
+            (32.0915, 34.7875, 390.0),  # Sweeps over Ambush Alpha & Golani sector
+            (32.0990, 34.7940, 420.0),
+            (32.1040, 34.8020, 440.0),
+            (32.0980, 34.8050, 410.0),
+            (32.0920, 34.7930, 370.0),
         ],
     },
     {
-        "name": "Hostile UAV Bravo",
+        "name": "Kamikaze Drone Bravo",
         "severity": "high",
-        "radius": 150.0,
+        "radius": 160.0,
+        # Slalom / figure-8 pattern sweeping over eastern sector and Paratroopers path
         "key_points": [
-            (32.0800, 34.7500, 320.0),
-            (32.1000, 34.7550, 340.0),
-            (32.1200, 34.7600, 330.0),
-            (32.1050, 34.7750, 325.0),
-            (32.0850, 34.7650, 315.0),
+            (32.0905, 34.7910, 210.0),
+            (32.0955, 34.7965, 240.0),  # Sweeps over Minefield Bravo & Paratroopers sector
+            (32.1010, 34.8030, 280.0),
+            (32.0970, 34.8090, 270.0),
+            (32.0925, 34.8000, 230.0),
+        ],
+    },
+]
+
+# 3. Ground Combat Squads (Realistic infantry patrol pace)
+SQUAD_CONFIGS = [
+    {
+        "username": "squad_golani",
+        "role": "Squad",
+        "name": "Golani Recon Squad",
+        "description": "Elite forward reconnaissance patrol",
+        "area": "Center",
+        "start_point": (32.0853, 34.7818),
+        "soldier_id": "1000001",
+        "soldier_name": "David Cohen",
+        "soldier_role": "commander",
+        # Route enters and crosses Hostile Ambush Alpha at (32.0915, 34.7875)
+        "route": [
+            (32.0853, 34.7818),
+            (32.0880, 34.7845),
+            (32.0915, 34.7875),  # INTRUSION: Penetrates Hostile Ambush Alpha (radius 220m)!
+            (32.0945, 34.7910),  # Exits Ambush Alpha perimeter
+            (32.0935, 34.7945),
+            (32.0905, 34.7925),
+            (32.0875, 34.7870),
         ],
     },
     {
-        "name": "Kamikaze Drone Charlie",
-        "severity": "critical",
-        "radius": 250.0,
-        "key_points": [
-            (32.0920, 34.7890, 180.0),
-            (32.0980, 34.7980, 220.0),
-            (32.1060, 34.8080, 260.0),
-            (32.0940, 34.7904, 210.0),
-            (32.0865, 34.7830, 190.0),
+        "username": "squad_paratroopers",
+        "role": "SapperSquad",
+        "name": "Paratroopers Sapper Squad",
+        "description": "Combat engineering & EOD assault unit",
+        "area": "Center",
+        "start_point": (32.0920, 34.7890),
+        "soldier_id": "2000001",
+        "soldier_name": "Ariel Mizrahi",
+        "soldier_role": "commander",
+        # Route enters and crosses Minefield Perimeter Bravo at (32.0955, 34.7965)
+        "route": [
+            (32.0920, 34.7890),
+            (32.0945, 34.7925),
+            (32.0955, 34.7965),  # INTRUSION: Penetrates Minefield Perimeter Bravo (radius 200m)!
+            (32.0980, 34.8000),  # Exits Minefield perimeter
+            (32.0965, 34.8030),
+            (32.0930, 34.8000),
+            (32.0910, 34.7950),
         ],
     },
 ]
 
 
-def interpolate_route_2d(key_points: list, step_meters: float = 25.0) -> list:
+def interpolate_route_2d(key_points: list, step_meters: float = 1.0) -> list:
+    """
+    Subdivides waypoints into smooth micro-steps (e.g. 1.0 meter steps)
+    to completely eliminate jumping across the tactical map.
+    """
     dense_path = []
     num_pts = len(key_points)
     for i in range(num_pts):
@@ -104,7 +151,11 @@ def interpolate_route_2d(key_points: list, step_meters: float = 25.0) -> list:
     return dense_path
 
 
-def interpolate_route_3d(key_points: list, step_meters: float = 70.0) -> list:
+def interpolate_route_3d(key_points: list, step_meters: float = 5.5) -> list:
+    """
+    Interpolates 3D coordinates (lat, lon, altitude) for high-speed,
+    silky-smooth UAV drone flight.
+    """
     dense_path = []
     num_pts = len(key_points)
     for i in range(num_pts):
@@ -136,7 +187,7 @@ def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
 
 
 # ==============================================================================
-# SIMULATION ENGINE STATE
+# SIMULATION ENGINE CORE
 # ==============================================================================
 
 class SimulatorEngine:
@@ -159,13 +210,24 @@ class SimulatorEngine:
             "is_running": self._is_running,
             "mode": self._current_mode,
             "active_tasks": list(self._tasks.keys()),
+            "squads_active": len([k for k in self._tasks if k.startswith("squad_")]),
+            "drones_active": len([k for k in self._tasks if k.startswith("drone_")]),
         }
 
-    async def update_squad_location(self, squad_id: UUID, lat: float, lon: float, heading: float):
+    async def update_squad_location(
+        self,
+        squad_id: UUID,
+        lat: float,
+        lon: float,
+        heading: float,
+    ):
+        """
+        Pushes real-time squad telemetry via WebSockets and checks for threat breaches.
+        """
         now = datetime.now(timezone.utc)
         area = calculate_area_from_lat(lat)
 
-        # 1. Broadcast live movement to map with zero latency
+        # 1. Emit squad_moved event
         payload = {
             "id": str(squad_id),
             "lat": lat,
@@ -191,7 +253,7 @@ class SimulatorEngine:
                 client["area"] = area
                 await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
 
-        # 3. Persist to Postgres safely in background without blocking real-time WebSocket loop
+        # 3. Persist to Postgres safely in background without blocking animation loop
         async def _save_squad_coords():
             try:
                 async with async_session_maker() as session:
@@ -233,15 +295,18 @@ class SimulatorEngine:
         altitude: float,
         name: str = "Hostile UAV",
         severity: str = "critical",
-        radius: float = 200.0,
+        radius: float = 180.0,
     ):
+        """
+        Pushes real-time UAV aerial telemetry and tests proximity danger checks.
+        """
         now = datetime.now(timezone.utc)
         payload = {
             "id": str(threat_id),
             "name": name,
             "threat_type": "drone",
             "severity_level": severity,
-            "engagement_status": "detected",
+            "engagement_status": "unassigned",
             "radius": radius,
             "altitude": altitude,
             "lat": lat,
@@ -269,6 +334,9 @@ class SimulatorEngine:
         asyncio.create_task(_save_drone_coords())
 
     async def _run_squad_patrol(self, squad_username: str, squad_id: UUID, path: list, delay: float = 0.25):
+        """
+        Autonomous squad patrol: 1.0 meter step every 250ms (~4.0 m/s = 14.4 km/h brisk tactical advance).
+        """
         total = len(path)
         step = self._step_indices.get(squad_username, 0)
         try:
@@ -284,7 +352,10 @@ class SimulatorEngine:
         except asyncio.CancelledError:
             pass
 
-    async def _run_drone_flight(self, threat_id: UUID, path: list, cfg: dict, delay: float = 0.3):
+    async def _run_drone_flight(self, threat_id: UUID, path: list, cfg: dict, delay: float = 0.25):
+        """
+        Autonomous UAV reconnaissance: 5.5 meters step every 250ms (~22 m/s = 79.2 km/h tactical flight).
+        """
         total = len(path)
         step = self._step_indices.get(str(threat_id), 0)
         try:
@@ -297,7 +368,7 @@ class SimulatorEngine:
                     altitude=alt,
                     name=cfg.get("name", "Hostile UAV"),
                     severity=cfg.get("severity", "critical"),
-                    radius=cfg.get("radius", 200.0),
+                    radius=cfg.get("radius", 180.0),
                 )
                 step += 1
                 self._step_indices[str(threat_id)] = step
@@ -306,42 +377,76 @@ class SimulatorEngine:
             pass
 
     async def start(self, mode: str = "all") -> Dict[str, Any]:
+        """
+        Launches full tactical simulation.
+        Automatically provisions:
+          - 2 static ground threats (Hostile Ambush Alpha, Minefield Perimeter Bravo)
+          - 2 high-speed UAV reconnaissance drones
+          - 2 active field squads (Golani & Paratroopers)
+        """
         await self.stop()
         self._is_running = True
         self._current_mode = mode
 
-        DEMO_DANGER_NAME = "Hostile Ambush & Minefield Alpha"
-        DEMO_DANGER_LAT = 32.0915
-        DEMO_DANGER_LON = 34.7875
-        DEMO_DANGER_RADIUS = 250.0
-
         async with async_session_maker() as session:
-            # 1. Ensure demonstration danger zone exists directly on squad_golani patrol route
-            demo_stmt = select(Threat).where(Threat.name == DEMO_DANGER_NAME)
-            demo_threat = (await session.execute(demo_stmt)).scalar_one_or_none()
-            if not demo_threat:
-                demo_threat = Threat(
-                    name=DEMO_DANGER_NAME,
-                    threat_type="ambush",
-                    severity_level="critical",
-                    status="active",
-                    engagement_status="detected",
-                    radius=DEMO_DANGER_RADIUS,
-                    geom=WKTElement(f"POINT({DEMO_DANGER_LON} {DEMO_DANGER_LAT})", srid=4326),
-                )
-                session.add(demo_threat)
-                await session.commit()
-                await session.refresh(demo_threat)
-                resp = ThreatResponse.from_threat(demo_threat, DEMO_DANGER_LAT, DEMO_DANGER_LON)
-                await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
-            elif demo_threat.status != "active":
-                demo_threat.status = "active"
-                demo_threat.engagement_status = "detected"
-                await session.commit()
-                resp = ThreatResponse.from_threat(demo_threat, DEMO_DANGER_LAT, DEMO_DANGER_LON)
-                await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+            # 0. Ensure command authority user exists for threat attribution
+            creator_stmt = select(User).where(User.role.in_(["MainCommandCenter", "AreaCommandCenter"]))
+            creator_user = (await session.execute(creator_stmt)).scalars().first()
+            if not creator_user:
+                creator_user = (await session.execute(select(User))).scalars().first()
 
-            # 2. Ensure all configured high-speed drones exist in DB
+            if not creator_user:
+                soldier_admin = Soldier(id="9990001", name="Gen. Eyal Zamir", role="commander")
+                session.add(soldier_admin)
+                await session.flush()
+                creator_user = User(
+                    username="admin",
+                    password_hash=hash_password("admin123"),
+                    role="MainCommandCenter",
+                    area="Global",
+                    name="Main Command Center",
+                    description="HQ Supreme Operational Command",
+                    soldier_id=soldier_admin.id,
+                    status="active",
+                    is_logged_in=False,
+                )
+                session.add(creator_user)
+                await session.flush()
+
+            creator_id = creator_user.id
+            creator_soldier_id = creator_user.soldier_id
+
+            # 1. Provision / activate static ground threats
+            for gt in GROUND_THREATS:
+                stmt = select(Threat).where(Threat.name == gt["name"])
+                threat = (await session.execute(stmt)).scalar_one_or_none()
+                if not threat:
+                    threat = Threat(
+                        type=gt["type"],
+                        name=gt["name"],
+                        description=gt.get("description"),
+                        threat_type=gt["threat_type"],
+                        severity_level=gt["severity_level"],
+                        status="active",
+                        engagement_status="unassigned",
+                        radius=gt["radius"],
+                        geom=WKTElement(f"POINT({gt['lon']} {gt['lat']})", srid=4326),
+                        created_by_id=creator_id,
+                        created_by_soldier_id=creator_soldier_id,
+                    )
+                    session.add(threat)
+                    await session.commit()
+                    await session.refresh(threat)
+                    resp = ThreatResponse.from_threat(threat, gt["lat"], gt["lon"])
+                    await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
+                elif threat.status != "active":
+                    threat.status = "active"
+                    threat.engagement_status = "unassigned"
+                    await session.commit()
+                    resp = ThreatResponse.from_threat(threat, gt["lat"], gt["lon"])
+                    await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+
+            # 2. Provision / activate dynamic UAV drones
             drones_stmt = select(Threat).where(Threat.threat_type == "drone")
             existing_drones = list((await session.execute(drones_stmt)).scalars().all())
 
@@ -351,14 +456,17 @@ class SimulatorEngine:
                 first_pt = cfg["key_points"][0]
                 if not d_match:
                     d_match = Threat(
+                        type="movable",
                         name=cfg["name"],
                         threat_type="drone",
                         severity_level=cfg["severity"],
                         status="active",
-                        engagement_status="detected",
+                        engagement_status="unassigned",
                         radius=cfg["radius"],
                         altitude=first_pt[2],
                         geom=WKTElement(f"POINT({first_pt[1]} {first_pt[0]})", srid=4326),
+                        created_by_id=creator_id,
+                        created_by_soldier_id=creator_soldier_id,
                     )
                     session.add(d_match)
                     await session.commit()
@@ -367,42 +475,90 @@ class SimulatorEngine:
                     await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
                 elif d_match.status != "active":
                     d_match.status = "active"
-                    d_match.engagement_status = "detected"
+                    d_match.engagement_status = "unassigned"
                     await session.commit()
                     resp = ThreatResponse.from_threat(d_match, first_pt[0], first_pt[1])
                     await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
                 active_drones.append((d_match, cfg))
 
-            # Reload memory threats cache for instant breach checks
-            from app.sockets.server import _ensure_threats_cache_loaded
+            # 3. Provision / ensure field squads exist in DB
+            active_squad_users = []
+            for sc in SQUAD_CONFIGS:
+                user_stmt = select(User).where(User.username == sc["username"])
+                user = (await session.execute(user_stmt)).scalar_one_or_none()
+
+                if not user:
+                    # Create soldier first if needed
+                    s_stmt = select(Soldier).where(Soldier.id == sc["soldier_id"])
+                    soldier = (await session.execute(s_stmt)).scalar_one_or_none()
+                    if not soldier:
+                        soldier = Soldier(
+                            id=sc["soldier_id"],
+                            name=sc["soldier_name"],
+                            role=sc["soldier_role"],
+                        )
+                        session.add(soldier)
+                        await session.flush()
+
+                    user = User(
+                        username=sc["username"],
+                        password_hash=hash_password("squad123"),
+                        role=sc["role"],
+                        area=sc["area"],
+                        name=sc["name"],
+                        description=sc["description"],
+                        soldier_id=sc["soldier_id"],
+                        status="active",
+                        is_logged_in=False,
+                    )
+                    session.add(user)
+                    await session.flush()
+
+                # Ensure squad has MapEntity
+                map_stmt = select(MapEntity).where(MapEntity.id == user.id)
+                map_ent = (await session.execute(map_stmt)).scalar_one_or_none()
+                if not map_ent:
+                    start_pt = sc["start_point"]
+                    map_ent = MapEntity(
+                        id=user.id,
+                        geom=WKTElement(f"POINT({start_pt[1]} {start_pt[0]})", srid=4326),
+                        heading=90.0,
+                        status="active",
+                    )
+                    session.add(map_ent)
+                    await session.flush()
+
+                active_squad_users.append((user, sc))
+
+            await session.commit()
+
+            # 4. Synchronize memory threat cache for instant danger zone detection
             await _ensure_threats_cache_loaded(session)
 
-            # Load squads from DB
-            squads_stmt = select(User).where(User.role.in_(["Squad", "SapperSquad"]), User.status == "active")
-            squads = (await session.execute(squads_stmt)).scalars().all()
-
-        # Launch squad simulations (Slow, realistic, and silky smooth: 1.0m step, 0.25s delay)
+        # 5. Launch squad patrol tasks
         if mode in ["all", "squads"]:
-            for u in squads:
-                key = u.username if u.username in SQUAD_ROUTES else "squad_golani"
-                dense_path = interpolate_route_2d(SQUAD_ROUTES[key], step_meters=1.0)
+            for u, sc in active_squad_users:
+                dense_path = interpolate_route_2d(sc["route"], step_meters=1.0)
                 task_name = f"squad_{u.username}"
                 self._tasks[task_name] = asyncio.create_task(
                     self._run_squad_patrol(u.username, u.id, dense_path, delay=0.25)
                 )
 
-        # Launch drone simulations (High-speed aerial sweep: 160m step, 0.3s delay)
+        # 6. Launch drone flight tasks
         if mode in ["all", "drones"]:
             for d, cfg in active_drones:
-                dense_path = interpolate_route_3d(cfg["key_points"], step_meters=160.0)
+                dense_path = interpolate_route_3d(cfg["key_points"], step_meters=5.5)
                 task_name = f"drone_{d.id}"
                 self._tasks[task_name] = asyncio.create_task(
-                    self._run_drone_flight(d.id, dense_path, cfg, delay=0.3)
+                    self._run_drone_flight(d.id, dense_path, cfg, delay=0.25)
                 )
 
         return self.get_status()
 
     async def stop(self) -> Dict[str, Any]:
+        """
+        Gracefully stops all simulation tasks.
+        """
         for name, task in list(self._tasks.items()):
             task.cancel()
         if self._tasks:
@@ -412,8 +568,16 @@ class SimulatorEngine:
         self._current_mode = "stopped"
         return self.get_status()
 
-    async def manual_step(self, target_type: str, target_id: UUID, direction: str, delta: float = 0.0005) -> Dict[str, Any]:
-        """Manual step for a squad or drone."""
+    async def manual_step(
+        self,
+        target_type: str,
+        target_id: UUID,
+        direction: str,
+        delta: float = 0.0005,
+    ) -> Dict[str, Any]:
+        """
+        Manual step for nudging a single squad or drone (e.g. from telemetry D-Pad).
+        """
         if target_type == "squad":
             async with async_session_maker() as session:
                 map_stmt = select(MapEntity).where(MapEntity.id == target_id)
@@ -427,12 +591,23 @@ class SimulatorEngine:
 
             d_lat = delta if direction == "up" else (-delta if direction == "down" else 0.0)
             d_lon = delta if direction == "right" else (-delta if direction == "left" else 0.0)
-            heading = 0.0 if direction == "up" else (180.0 if direction == "down" else (90.0 if direction == "right" else 270.0))
+            heading = (
+                0.0 if direction == "up"
+                else (180.0 if direction == "down"
+                else (90.0 if direction == "right"
+                else 270.0))
+            )
 
             new_lat = curr_lat + d_lat
             new_lon = curr_lon + d_lon
             await self.update_squad_location(target_id, new_lat, new_lon, heading)
-            return {"status": "ok", "target_id": str(target_id), "lat": new_lat, "lon": new_lon, "heading": heading}
+            return {
+                "status": "ok",
+                "target_id": str(target_id),
+                "lat": new_lat,
+                "lon": new_lon,
+                "heading": heading,
+            }
 
         elif target_type == "drone":
             async with async_session_maker() as session:
@@ -452,7 +627,13 @@ class SimulatorEngine:
             new_lat = curr_lat + d_lat
             new_lon = curr_lon + d_lon
             await self.update_drone_location(target_id, new_lat, new_lon, new_alt)
-            return {"status": "ok", "threat_id": str(target_id), "lat": new_lat, "lon": new_lon, "altitude": new_alt}
+            return {
+                "status": "ok",
+                "threat_id": str(target_id),
+                "lat": new_lat,
+                "lon": new_lon,
+                "altitude": new_alt,
+            }
 
         return {"error": "Unknown target_type"}
 
