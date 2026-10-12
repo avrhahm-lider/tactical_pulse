@@ -6,8 +6,6 @@ import {
   Users,
   LogOut,
   PlusCircle,
-  Compass,
-  UserPlus,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useMapStore } from '../../store/useMapStore'
@@ -16,20 +14,21 @@ interface HeaderProps {
   onOpenCreateThreat: () => void
   onToggleUnitDrawer: () => void
   isUnitDrawerOpen: boolean
+  onOpenLiveUnitsList?: () => void
+  onOpenAlertsList?: () => void
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenCreateThreat,
   onToggleUnitDrawer,
   isUnitDrawerOpen,
+  onOpenLiveUnitsList,
+  onOpenAlertsList,
 }) => {
   const { user, logout } = useAuthStore()
   const {
     squads,
     threats,
-    selectedZoneFilter,
-    setSelectedZoneFilter,
-    setIsUserRegistrationModalOpen,
   } = useMapStore()
 
   const activeThreatCount = Object.values(threats).filter(
@@ -58,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="h-16 hud-glass border-b border-slate-800 px-6 flex items-center justify-between z-10 shrink-0">
-      {/* Left: Branding & Connection Status */}
+      {/* Left: Branding & Live Indicators */}
       <div className="flex items-center space-x-6">
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 rounded-lg bg-cyan-950 border border-cyan-500/60 flex items-center justify-center text-cyan-400 shadow-md shadow-cyan-900/30">
@@ -71,59 +70,31 @@ export const Header: React.FC<HeaderProps> = ({
                 C2 LIVE
               </span>
             </div>
-            <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>SOCKET LINK ACTIVE (PORT 8000)</span>
-            </div>
           </div>
         </div>
 
-        {/* Live Counters */}
-        <div className="hidden lg:flex items-center space-x-4 pl-6 border-l border-slate-800">
-          <div className="flex items-center space-x-2 text-xs font-mono bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-md">
-            <Radio className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-slate-400">UNITS:</span>
-            <span className="font-bold text-emerald-400">{activeSquadCount}</span>
-          </div>
+        {/* Live Indicators (Icon + Number only, Clickable, Framed with Solid Background) */}
+        <div className="flex items-center space-x-3 pl-4 border-l border-slate-800">
+          {/* Live Indicator (Green) -> Click opens connected locations / units list */}
+          <button
+            onClick={onOpenLiveUnitsList || onToggleUnitDrawer}
+            title="Active Connected Locations & Forces (Click to view Roster)"
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/90 hover:bg-emerald-900/90 border border-emerald-600/80 text-emerald-300 font-mono text-xs transition-all shadow-sm shadow-emerald-950/50 cursor-pointer shrink-0"
+          >
+            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span className="font-bold text-emerald-300 leading-none">{activeSquadCount}</span>
+          </button>
 
-          <div className="flex items-center space-x-2 text-xs font-mono bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-md">
+          {/* Alert Indicator (Red) -> Click opens active alerts list (Frame contained, no text spilling) */}
+          <button
+            onClick={onOpenAlertsList || onToggleUnitDrawer}
+            title="Active Tactical Alerts (Click to view Alerts list)"
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-red-950/95 hover:bg-red-900/95 border border-red-600/90 text-red-300 font-mono text-xs transition-all shadow-sm shadow-red-950/60 cursor-pointer shrink-0"
+          >
             <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-            <span className="text-slate-400">ACTIVE THREATS:</span>
-            <span className="font-bold text-red-400">{activeThreatCount}</span>
-          </div>
+            <span className="font-bold text-red-200 leading-none">{activeThreatCount}</span>
+          </button>
         </div>
-
-        {/* Manager Sector Control (MainCommandCenter Supreme Operational View) */}
-        {user?.role === 'MainCommandCenter' && (
-          <div className="hidden xl:flex items-center space-x-1 pl-6 border-l border-slate-800">
-            <span className="text-[11px] font-mono text-cyan-400 font-bold flex items-center gap-1.5 mr-1">
-              <Compass className="w-3.5 h-3.5" />
-              SECTOR:
-            </span>
-            {(['Global', 'North', 'Center', 'South'] as const).map((zone) => {
-              const isActive = selectedZoneFilter === zone
-              return (
-                <button
-                  key={zone}
-                  onClick={() => setSelectedZoneFilter(zone)}
-                  className={`px-2.5 py-1 rounded text-[10px] font-mono font-bold tracking-wider transition-all cursor-pointer border ${
-                    isActive
-                      ? zone === 'North'
-                        ? 'bg-cyan-950 border-cyan-400 text-cyan-300 shadow-[0_0_10px_rgba(0,229,255,0.4)]'
-                        : zone === 'Center'
-                        ? 'bg-amber-950 border-amber-400 text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.4)]'
-                        : zone === 'South'
-                        ? 'bg-emerald-950 border-emerald-400 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
-                        : 'bg-purple-950 border-purple-400 text-purple-300 shadow-[0_0_10px_rgba(168,85,247,0.4)]'
-                      : 'bg-slate-900/60 hover:bg-slate-800 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {zone === 'Global' ? 'GLOBAL (ALL)' : zone.toUpperCase()}
-                </button>
-              )
-            })}
-          </div>
-        )}
       </div>
 
       {/* Right: Actions & User Info */}
@@ -135,15 +106,6 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <PlusCircle className="w-4 h-4" />
           <span>OPEN ALERT</span>
-        </button>
-
-        {/* Register Force Button */}
-        <button
-          onClick={() => setIsUserRegistrationModalOpen(true)}
-          className="px-3 py-2 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-cyan-300 font-mono text-xs font-semibold tracking-wider flex items-center space-x-2 border border-cyan-500/50 hover:border-cyan-400 transition-all cursor-pointer"
-        >
-          <UserPlus className="w-4 h-4 text-cyan-400" />
-          <span className="hidden md:inline">REGISTER FORCE</span>
         </button>
 
         {/* Toggle Unit Drawer */}

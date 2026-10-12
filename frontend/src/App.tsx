@@ -26,6 +26,7 @@ export const App: React.FC = () => {
   } = useMapStore()
 
   const [isUnitDrawerOpen, setIsUnitDrawerOpen] = useState(false)
+  const [drawerInitialTab, setDrawerInitialTab] = useState<'units' | 'alerts'>('units')
 
   // Session rehydration on mount
   useEffect(() => {
@@ -72,6 +73,14 @@ export const App: React.FC = () => {
         onOpenCreateThreat={() => setIsThreatModalOpen(true)}
         onToggleUnitDrawer={() => setIsUnitDrawerOpen((prev) => !prev)}
         isUnitDrawerOpen={isUnitDrawerOpen}
+        onOpenLiveUnitsList={() => {
+          setDrawerInitialTab('units')
+          setIsUnitDrawerOpen(true)
+        }}
+        onOpenAlertsList={() => {
+          setDrawerInitialTab('alerts')
+          setIsUnitDrawerOpen(true)
+        }}
       />
 
       {/* Main Tactical Map View */}
@@ -88,6 +97,7 @@ export const App: React.FC = () => {
         <UnitListDrawer
           isOpen={isUnitDrawerOpen}
           onClose={() => setIsUnitDrawerOpen(false)}
+          initialTab={drawerInitialTab}
         />
 
         {/* Threat Creation Modal */}

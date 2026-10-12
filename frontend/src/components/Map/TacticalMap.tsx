@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useMemo, useCallback } from 'react'
+import React, { useEffect, useRef, useMemo, useCallback, useState } from 'react'
 import L from 'leaflet'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import type { Squad, Threat, User } from '../../types'
-import { Compass, Crosshair, Maximize2 } from 'lucide-react'
+import { Compass, Crosshair, Maximize2, Grid } from 'lucide-react'
 
 // Leaflet default icon fix
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl
@@ -75,6 +75,27 @@ const SECTOR_DEFS: Record<'North' | 'Center' | 'South', SectorConfig> = {
     ],
     center: [31.2, 34.7],
   },
+}
+
+// 2km x 2km Tactical Grid System
+// 1 deg lat ≈ 111.132 km -> 2 km ≈ 0.0180 deg
+// At 31.8° lat, 1 deg lon ≈ 111.132 * cos(31.8°) ≈ 94.46 km -> 2 km ≈ 0.0212 deg
+const GRID_LAT_STEP = 0.0180
+const GRID_LON_STEP = 0.0212
+
+// Extent encompassing all operational sectors of Israel
+const GRID_ORIGIN_LAT = 29.40
+const GRID_ORIGIN_LON = 34.15
+const GRID_MAX_LAT = 33.45
+const GRID_MAX_LON = 35.95
+
+const GRID_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+// Generates a strictly 3-character identifier (1 letter + 2 digits, e.g. A01, B14, Z99)
+function getGridCellId(rowIndex: number, colIndex: number): string {
+  const letter = GRID_LETTERS[((rowIndex % 26) + 26) % 26]
+  const num = String((((colIndex % 99) + 99) % 99) + 1).padStart(2, '0')
+  return `${letter}${num}`
 }
 
 // Check if an entity is a dynamic operational force (excluding static headquarters)
@@ -222,8 +243,11 @@ export const TacticalMap: React.FC = () => {
   const markersLayerRef = useRef<L.LayerGroup | null>(null)
   const threatsLayerRef = useRef<L.LayerGroup | null>(null)
   const zonesLayerRef = useRef<L.LayerGroup | null>(null)
+  const gridLayerRef = useRef<L.LayerGroup | null>(null)
   const pinMarkerRef = useRef<L.Marker | null>(null)
   const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
+
+  const [isGridVisible, setIsGridVisible] = useState(true)
 
   const {
     squads,
@@ -289,6 +313,7 @@ export const TacticalMap: React.FC = () => {
 
     // Layers
     zonesLayerRef.current = L.layerGroup().addTo(map)
+    gridLayerRef.current = L.layerGroup().addTo(map)
     threatsLayerRef.current = L.layerGroup().addTo(map)
     markersLayerRef.current = L.layerGroup().addTo(map)
 
@@ -297,6 +322,7 @@ export const TacticalMap: React.FC = () => {
     return () => {
       map.remove()
       mapInstanceRef.current = null
+      gridLayerRef.current = null
       squadMarkersRef.current.clear()
     }
   }, [])
@@ -384,6 +410,39 @@ export const TacticalMap: React.FC = () => {
     }
   }, [relevantSignature, autoAdjustView])
 
+  // Check permission for sector navigation (Restricted by user role and assigned area)
+  const canNavigateToSector = useCallback(
+    (secKey: 'North' | 'Center' | 'South'): boolean => {
+      if (!user) return false
+      if (user.role === 'MainCommandCenter') return true
+      return user.area === secKey
+    },
+    [user]
+  )
+
+  // Navigate (fly camera) to specific area
+  const handleNavigateToSector = useCallback(
+    (secKey: 'North' | 'Center' | 'South') => {
+      const map = mapInstanceRef.current
+      if (!map) return
+
+      if (!canNavigateToSector(secKey)) {
+        alert(
+          `ACCESS RESTRICTED: Operational clearance is restricted to your assigned command sector (${user?.area?.toUpperCase() || 'assigned'}).`
+        )
+        return
+      }
+
+      const sec = SECTOR_DEFS[secKey]
+      map.flyToBounds(sec.bounds, { padding: [50, 50], maxZoom: 11, duration: 1.2 })
+
+      if (user?.role === 'MainCommandCenter') {
+        setSelectedZoneFilter(secKey)
+      }
+    },
+    [canNavigateToSector, user, setSelectedZoneFilter]
+  )
+
   // Render Operational Zones & Authorized Sector Visualizations
   useEffect(() => {
     const zonesLayer = zonesLayerRef.current
@@ -392,7 +451,6 @@ export const TacticalMap: React.FC = () => {
     zonesLayer.clearLayers()
 
     const isManager = user?.role === 'MainCommandCenter'
-    const isRegionalHQ = user?.role === 'AreaCommandCenter'
     const authorizedArea = user?.area as 'North' | 'Center' | 'South' | 'Global'
 
     // 1. Draw Dividing Lines
@@ -426,7 +484,7 @@ export const TacticalMap: React.FC = () => {
       })
       .addTo(zonesLayer)
 
-    // 2. Render Sector Polygons
+    // 2. Render Sector Polygons with Clickable Hover Labels (Restricted to authorized users)
     ;(Object.keys(SECTOR_DEFS) as Array<'North' | 'Center' | 'South'>).forEach((secKey) => {
       const sec = SECTOR_DEFS[secKey]
       const polygonCoords: [number, number][] = [
@@ -436,90 +494,75 @@ export const TacticalMap: React.FC = () => {
         [sec.minLat, sec.maxLon],
       ]
 
-      let isAuthorized = false
+      const isPermitted = canNavigateToSector(secKey)
+      const isFocused = isManager && selectedZoneFilter === secKey
+      const isAuthorized = isManager || authorizedArea === secKey
 
-      if (isRegionalHQ) {
-        isAuthorized = authorizedArea === secKey
-      } else if (isManager) {
-        isAuthorized = true
-      } else {
-        // Field Squad
-        isAuthorized = authorizedArea === secKey
-      }
+      const poly = L.polygon(polygonCoords, {
+        color: isAuthorized ? sec.color : '#334155',
+        weight: isFocused ? 3 : isAuthorized ? 2 : 1.2,
+        fillColor: isAuthorized ? sec.color : '#000000',
+        fillOpacity: isFocused ? 0.16 : isAuthorized ? 0.08 : 0.28,
+        dashArray: isAuthorized ? undefined : '5, 5',
+        interactive: true,
+      })
 
-      if (isRegionalHQ) {
-        if (isAuthorized) {
-          // Highlight user's Authorized Zone
-          L.polygon(polygonCoords, {
-            color: sec.color,
-            weight: 2.5,
-            fillColor: sec.color,
-            fillOpacity: 0.12,
-            dashArray: undefined,
-          })
-            .bindTooltip(`AUTHORIZED OPERATIONAL ZONE — ${secKey.toUpperCase()} COMMAND (HQ)`, {
-              permanent: true,
-              direction: 'center',
-              className:
-                secKey === 'North'
-                  ? 'tactical-tooltip'
-                  : secKey === 'Center'
-                  ? 'tactical-tooltip-amber'
-                  : 'tactical-tooltip-green',
-            })
-            .addTo(zonesLayer)
-        } else {
-          // Muted out-of-sector area
-          L.polygon(polygonCoords, {
-            color: '#334155',
-            weight: 1,
-            fillColor: '#000000',
-            fillOpacity: 0.35,
-            dashArray: '4, 4',
-          })
-            .bindTooltip(`RESTRICTED SECTOR (${secKey.toUpperCase()}) — OUTSIDE JURISDICTION`, {
-              permanent: false,
-              direction: 'center',
-              className: 'tactical-tooltip',
-            })
-            .addTo(zonesLayer)
+      // When hovering over an area, a label appears; clicking the label navigates to that area
+      const labelHtml = isPermitted
+        ? `<div class="tactical-sector-label-content">
+             <span class="sector-badge-permitted">📍 ${sec.name.toUpperCase()} COMMAND SECTOR</span>
+             <span class="sector-action-hint">CLICK TO NAVIGATE</span>
+           </div>`
+        : `<div class="tactical-sector-label-content forbidden">
+             <span class="sector-badge-forbidden">⛔ RESTRICTED SECTOR (${secKey.toUpperCase()})</span>
+             <span class="sector-action-hint">CLEARANCE RESTRICTED</span>
+           </div>`
+
+      poly.bindTooltip(labelHtml, {
+        sticky: true,
+        interactive: true,
+        direction: 'center',
+        className: `tactical-sector-tooltip ${
+          secKey === 'North'
+            ? 'tooltip-north'
+            : secKey === 'Center'
+            ? 'tooltip-center'
+            : 'tooltip-south'
+        } ${isPermitted ? 'is-permitted' : 'is-restricted'}`,
+      })
+
+      // Click on polygon area to navigate
+      poly.on('click', () => {
+        handleNavigateToSector(secKey)
+      })
+
+      // Ensure click on the tooltip label element itself also navigates
+      poly.on('tooltipopen', (e) => {
+        const tooltipEl = e.tooltip.getElement()
+        if (tooltipEl) {
+          tooltipEl.onclick = (ev: MouseEvent) => {
+            ev.stopPropagation()
+            handleNavigateToSector(secKey)
+          }
         }
-      } else if (isManager) {
-        // Manager Supreme Operational View
-        const isFocused = selectedZoneFilter === secKey
-        L.polygon(polygonCoords, {
-          color: isFocused ? sec.color : '#475569',
-          weight: isFocused ? 3 : 1.5,
-          fillColor: isFocused ? sec.color : '#000000',
-          fillOpacity: isFocused ? 0.15 : selectedZoneFilter === 'Global' ? 0.06 : 0.35,
-          dashArray: isFocused ? undefined : '5, 5',
+      })
+
+      // Hover visual feedback
+      poly.on('mouseover', () => {
+        poly.setStyle({
+          fillOpacity: isPermitted ? 0.22 : 0.35,
+          weight: isPermitted ? 3 : 2,
         })
-          .bindTooltip(
-            isFocused
-              ? `ACTIVE COMMAND SECTOR: ${secKey.toUpperCase()}`
-              : `${sec.name.toUpperCase()} (OPERATIONAL SECTOR)`,
-            {
-              permanent: isFocused || selectedZoneFilter === 'Global',
-              direction: 'center',
-              className:
-                secKey === 'North'
-                  ? 'tactical-tooltip'
-                  : secKey === 'Center'
-                  ? 'tactical-tooltip-amber'
-                  : 'tactical-tooltip-green',
-            }
-          )
-          .addTo(zonesLayer)
-      } else {
-        // Regular Field Units
-        L.polygon(polygonCoords, {
-          color: sec.color,
-          weight: 1.5,
-          fillColor: sec.color,
-          fillOpacity: 0.05,
-          dashArray: '4, 4',
-        }).addTo(zonesLayer)
-      }
+      })
+
+      poly.on('mouseout', () => {
+        poly.setStyle({
+          fillOpacity: isFocused ? 0.16 : isAuthorized ? 0.08 : 0.28,
+          weight: isFocused ? 3 : isAuthorized ? 2 : 1.2,
+        })
+      })
+
+      poly.addTo(zonesLayer)
     })
 
     // 3. For field squads, render 20 km tactical awareness radius circle around user
@@ -540,7 +583,100 @@ export const TacticalMap: React.FC = () => {
         })
         .addTo(zonesLayer)
     }
-  }, [user, selectedZoneFilter, squads])
+  }, [user, selectedZoneFilter, squads, canNavigateToSector, handleNavigateToSector])
+
+  // Render 2km x 2km Tactical Grid with 3-character Identifiers
+  const renderTacticalGrid = useCallback(() => {
+    const map = mapInstanceRef.current
+    const gridLayer = gridLayerRef.current
+    if (!map || !gridLayer) return
+
+    gridLayer.clearLayers()
+    if (!isGridVisible) return
+
+    const zoom = map.getZoom()
+    // Tactical grid squares visible when zoom >= 9
+    if (zoom < 9) return
+
+    const bounds = map.getBounds()
+    const south = Math.max(bounds.getSouth(), GRID_ORIGIN_LAT)
+    const north = Math.min(bounds.getNorth(), GRID_MAX_LAT)
+    const west = Math.max(bounds.getWest(), GRID_ORIGIN_LON)
+    const east = Math.min(bounds.getEast(), GRID_MAX_LON)
+
+    if (south >= north || west >= east) return
+
+    const minRow = Math.max(0, Math.floor((south - GRID_ORIGIN_LAT) / GRID_LAT_STEP) - 1)
+    const maxRow = Math.floor((north - GRID_ORIGIN_LAT) / GRID_LAT_STEP) + 1
+    const minCol = Math.max(0, Math.floor((west - GRID_ORIGIN_LON) / GRID_LON_STEP) - 1)
+    const maxCol = Math.floor((east - GRID_ORIGIN_LON) / GRID_LON_STEP) + 1
+
+    const showLabels = zoom >= 10
+
+    for (let r = minRow; r <= maxRow; r++) {
+      const cellSouth = GRID_ORIGIN_LAT + r * GRID_LAT_STEP
+      const cellNorth = cellSouth + GRID_LAT_STEP
+      if (cellNorth < south || cellSouth > north) continue
+
+      for (let c = minCol; c <= maxCol; c++) {
+        const cellWest = GRID_ORIGIN_LON + c * GRID_LON_STEP
+        const cellEast = cellWest + GRID_LON_STEP
+        if (cellEast < west || cellWest > east) continue
+
+        const cellId = getGridCellId(r, c)
+
+        L.rectangle(
+          [
+            [cellSouth, cellWest],
+            [cellNorth, cellEast],
+          ],
+          {
+            color: '#38bdf8',
+            weight: 0.8,
+            opacity: 0.25,
+            fillColor: '#00e5ff',
+            fillOpacity: 0.015,
+            interactive: false,
+          }
+        ).addTo(gridLayer)
+
+        if (showLabels) {
+          const centerLat = (cellSouth + cellNorth) / 2
+          const centerLon = (cellWest + cellEast) / 2
+
+          L.marker([centerLat, centerLon], {
+            icon: L.divIcon({
+              className: 'grid-cell-label-icon',
+              html: `<div class="grid-cell-id">${cellId}</div>`,
+              iconSize: [32, 14],
+              iconAnchor: [16, 7],
+            }),
+            interactive: false,
+          }).addTo(gridLayer)
+        }
+      }
+    }
+  }, [isGridVisible])
+
+  // Attach Tactical Grid updates to Map view movement
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map) return
+
+    const handleUpdate = () => {
+      renderTacticalGrid()
+    }
+
+    map.on('moveend', handleUpdate)
+    map.on('zoomend', handleUpdate)
+
+    renderTacticalGrid()
+
+    return () => {
+      map.off('moveend', handleUpdate)
+      map.off('zoomend', handleUpdate)
+    }
+  }, [renderTacticalGrid])
 
   // Render Temporary Pin Placement Marker
   useEffect(() => {
@@ -846,7 +982,7 @@ export const TacticalMap: React.FC = () => {
       {/* Map Target Container */}
       <div ref={mapContainerRef} className="w-full h-full" />
 
-      {/* Auto-Fit Range HUD Button (Spans from first to last incident/force, ignoring empty area) */}
+      {/* Auto-Fit Range HUD Button & 2km Tactical Grid Toggle */}
       <div className="absolute top-4 left-4 z-[999] hud-panel px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-2 font-mono text-xs">
         <button
           onClick={() => autoAdjustView(true)}
@@ -855,6 +991,19 @@ export const TacticalMap: React.FC = () => {
         >
           <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
           <span>AUTO-FIT VIEW</span>
+        </button>
+
+        <button
+          onClick={() => setIsGridVisible((prev) => !prev)}
+          title="Toggle 2km x 2km Tactical Grid Overlay with 3-character identifiers"
+          className={`flex items-center space-x-1.5 px-2 py-1 rounded border transition-all cursor-pointer text-[11px] font-bold ${
+            isGridVisible
+              ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-[0_0_8px_rgba(0,229,255,0.3)]'
+              : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-400'
+          }`}
+        >
+          <Grid className="w-3.5 h-3.5 text-cyan-400" />
+          <span>GRID (2KM): {isGridVisible ? 'ON' : 'OFF'}</span>
         </button>
       </div>
 

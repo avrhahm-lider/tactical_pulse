@@ -323,4 +323,93 @@ body {
   color: #00e5ff !important;
 }
 
+/* Tactical Sector Hover Tooltips & Labels (Interactive & Clickable) */
+.tactical-sector-tooltip.leaflet-tooltip {
+  background: rgba(10, 15, 29, 0.95) !important;
+  backdrop-filter: blur(10px) !important;
+  padding: 6px 12px !important;
+  border-radius: 6px !important;
+  font-family: ui-monospace, monospace !important;
+  pointer-events: auto !important;
+  user-select: none !important;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.8) !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.tactical-sector-tooltip.is-permitted {
+  cursor: pointer !important;
+}
+
+.tactical-sector-tooltip.is-permitted:hover {
+  transform: scale(1.06) !important;
+}
+
+.tactical-sector-tooltip.is-restricted {
+  cursor: not-allowed !important;
+}
+
+.tactical-sector-tooltip.tooltip-north {
+  border: 1px solid #00e5ff !important;
+  color: #00e5ff !important;
+  box-shadow: 0 0 14px rgba(0, 229, 255, 0.4) !important;
+}
+
+.tactical-sector-tooltip.tooltip-center {
+  border: 1px solid #f59e0b !important;
+  color: #f59e0b !important;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.4) !important;
+}
+
+.tactical-sector-tooltip.tooltip-south {
+  border: 1px solid #10b981 !important;
+  color: #10b981 !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4) !important;
+}
+
+.tactical-sector-label-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.sector-badge-permitted {
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.sector-badge-forbidden {
+  font-weight: 800;
+  font-size: 11px;
+  color: #f87171;
+  letter-spacing: 0.05em;
+}
+
+.sector-action-hint {
+  font-size: 9px;
+  opacity: 0.9;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+/* 2km x 2km Tactical Grid Cell Labels (Strict 3-character format, e.g. A01, B14) */
+.grid-cell-label-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.grid-cell-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: rgba(56, 189, 248, 0.7);
+  text-shadow: 0 0 4px #000000, 0 0 8px #000000;
+  pointer-events: none;
+  user-select: none;
+  text-align: center;
+  line-height: 1;
+}
+
 
