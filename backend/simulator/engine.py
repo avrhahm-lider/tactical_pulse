@@ -6,34 +6,19 @@ from uuid import UUID
 from sqlalchemy import select
 from geoalchemy2.elements import WKTElement
 
-try:
-    from app.db.postgres import async_session_maker
-    from app.models.user import User
-    from app.models.map_entity import MapEntity
-    from app.models.threat import Threat
-    from app.schemas.threat import ThreatResponse
-    from app.services.spatial import calculate_area_from_lat
-    from app.sockets.server import (
-        sio,
-        broadcast_to_visibility_range,
-        broadcast_threat_event,
-        check_and_broadcast_danger_alerts,
-        _ensure_threats_cache_loaded,
-    )
-except ImportError:
-    from backend.app.db.postgres import async_session_maker  # type: ignore
-    from backend.app.models.user import User  # type: ignore
-    from backend.app.models.map_entity import MapEntity  # type: ignore
-    from backend.app.models.threat import Threat  # type: ignore
-    from backend.app.schemas.threat import ThreatResponse  # type: ignore
-    from backend.app.services.spatial import calculate_area_from_lat  # type: ignore
-    from backend.app.sockets.server import (  # type: ignore
-        sio,
-        broadcast_to_visibility_range,
-        broadcast_threat_event,
-        check_and_broadcast_danger_alerts,
-        _ensure_threats_cache_loaded,
-    )
+from app.db.postgres import async_session_maker
+from app.models.user import User
+from app.models.map_entity import MapEntity
+from app.models.threat import Threat
+from app.schemas.threat import ThreatResponse
+from app.services.spatial import calculate_area_from_lat
+from app.sockets.server import (
+    sio,
+    broadcast_to_visibility_range,
+    broadcast_threat_event,
+    check_and_broadcast_danger_alerts,
+    _ensure_threats_cache_loaded,
+)
 
 # ==============================================================================
 # WAYPOINTS & TRAJECTORIES

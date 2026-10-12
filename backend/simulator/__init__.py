@@ -1,6 +1,3 @@
-try:
-    from simulator.engine import simulator_engine, SimulatorEngine
-except ImportError:
-    from backend.simulator.engine import simulator_engine, SimulatorEngine  # type: ignore
+from simulator.engine import simulator_engine, SimulatorEngine
 
 __all__ = ["simulator_engine", "SimulatorEngine"]
