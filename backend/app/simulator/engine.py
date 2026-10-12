@@ -165,34 +165,7 @@ class SimulatorEngine:
         now = datetime.now(timezone.utc)
         area = calculate_area_from_lat(lat)
 
-        async with async_session_maker() as session:
-            map_stmt = select(MapEntity).where(MapEntity.id == squad_id)
-            map_res = await session.execute(map_stmt)
-            map_ent = map_res.scalar_one_or_none()
-
-            if map_ent:
-                map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                map_ent.heading = heading
-                map_ent.updated_at = now
-            else:
-                map_ent = MapEntity(
-                    id=squad_id,
-                    geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                    heading=heading,
-                    status="active",
-                    updated_at=now,
-                )
-                session.add(map_ent)
-
-            user_stmt = select(User).where(User.id == squad_id)
-            user_res = await session.execute(user_stmt)
-            user_obj = user_res.scalar_one_or_none()
-            if user_obj and user_obj.area != area:
-                user_obj.area = area
-
-            await session.commit()
-
-        # Broadcast live movement to map
+        # 1. Broadcast live movement to map with zero latency
         payload = {
             "id": str(squad_id),
             "lat": lat,
@@ -209,25 +182,90 @@ class SimulatorEngine:
             payload=payload,
         )
 
-    async def update_drone_location(self, threat_id: UUID, lat: float, lon: float, altitude: float):
+        # 2. Check danger perimeter breaches for connected client of this squad
+        from app.sockets.server import _connected_clients, check_and_broadcast_danger_alerts
+        for sid, client in list(_connected_clients.items()):
+            if client.get("user_id") == squad_id:
+                client["lat"] = lat
+                client["lon"] = lon
+                client["area"] = area
+                await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
+
+        # 3. Persist to Postgres safely without blocking real-time WebSocket telemetry
+        try:
+            async with async_session_maker() as session:
+                map_stmt = select(MapEntity).where(MapEntity.id == squad_id)
+                map_res = await session.execute(map_stmt)
+                map_ent = map_res.scalar_one_or_none()
+
+                if map_ent:
+                    map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                    map_ent.heading = heading
+                    map_ent.updated_at = now
+                else:
+                    map_ent = MapEntity(
+                        id=squad_id,
+                        geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
+                        heading=heading,
+                        status="active",
+                        updated_at=now,
+                    )
+                    session.add(map_ent)
+
+                user_stmt = select(User).where(User.id == squad_id)
+                user_res = await session.execute(user_stmt)
+                user_obj = user_res.scalar_one_or_none()
+                if user_obj and user_obj.area != area:
+                    user_obj.area = area
+
+                await session.commit()
+        except Exception as e:
+            print(f"[SIMULATOR DB ERROR] Error updating squad location: {e}")
+
+    async def update_drone_location(
+        self,
+        threat_id: UUID,
+        lat: float,
+        lon: float,
+        altitude: float,
+        name: str = "Hostile UAV",
+        severity: str = "critical",
+        radius: float = 200.0,
+    ):
         now = datetime.now(timezone.utc)
-        async with async_session_maker() as session:
-            stmt = select(Threat).where(Threat.id == threat_id)
-            res = await session.execute(stmt)
-            threat = res.scalar_one_or_none()
-            if not threat or threat.status != "active":
-                return
+        payload = {
+            "id": str(threat_id),
+            "name": name,
+            "threat_type": "drone",
+            "severity_level": severity,
+            "engagement_status": "detected",
+            "radius": radius,
+            "altitude": altitude,
+            "lat": lat,
+            "lon": lon,
+            "status": "active",
+            "updated_at": now.isoformat(),
+        }
+        await broadcast_threat_event("threat_updated", payload)
 
-            threat.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-            threat.altitude = altitude
-            threat.updated_at = now
-            await session.commit()
-            await session.refresh(threat)
+        # Persist to Postgres asynchronously without blocking fast animation loop
+        async def _save_drone_coords():
+            try:
+                async with async_session_maker() as session:
+                    stmt = select(Threat).where(Threat.id == threat_id)
+                    res = await session.execute(stmt)
+                    threat = res.scalar_one_or_none()
+                    if threat and threat.status == "active":
+                        threat.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+                        threat.altitude = altitude
+                        threat.updated_at = now
+                        await session.commit()
+            except Exception:
+                pass
 
-            resp = ThreatResponse.from_threat(threat, lat, lon)
-            await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+        asyncio.create_task(_save_drone_coords())
 
-    async def _run_squad_patrol(self, squad_username: str, squad_id: UUID, path: list, delay: float = 1.0):
+    async def _run_squad_patrol(self, squad_username: str, squad_id: UUID, path: list, delay: float = 0.8):
         total = len(path)
         step = self._step_indices.get(squad_username, 0)
         try:
@@ -243,13 +281,21 @@ class SimulatorEngine:
         except asyncio.CancelledError:
             pass
 
-    async def _run_drone_flight(self, threat_id: UUID, path: list, delay: float = 0.5):
+    async def _run_drone_flight(self, threat_id: UUID, path: list, cfg: dict, delay: float = 0.3):
         total = len(path)
         step = self._step_indices.get(str(threat_id), 0)
         try:
             while True:
                 lat, lon, alt = path[step % total]
-                await self.update_drone_location(threat_id, lat, lon, alt)
+                await self.update_drone_location(
+                    threat_id=threat_id,
+                    lat=lat,
+                    lon=lon,
+                    altitude=alt,
+                    name=cfg.get("name", "Hostile UAV"),
+                    severity=cfg.get("severity", "critical"),
+                    radius=cfg.get("radius", 200.0),
+                )
                 step += 1
                 self._step_indices[str(threat_id)] = step
                 await asyncio.sleep(delay)
@@ -261,33 +307,94 @@ class SimulatorEngine:
         self._is_running = True
         self._current_mode = mode
 
-        # Load squads from DB
+        DEMO_DANGER_NAME = "Hostile Ambush & Minefield Alpha"
+        DEMO_DANGER_LAT = 32.0915
+        DEMO_DANGER_LON = 34.7875
+        DEMO_DANGER_RADIUS = 250.0
+
         async with async_session_maker() as session:
+            # 1. Ensure demonstration danger zone exists directly on squad_golani patrol route
+            demo_stmt = select(Threat).where(Threat.name == DEMO_DANGER_NAME)
+            demo_threat = (await session.execute(demo_stmt)).scalar_one_or_none()
+            if not demo_threat:
+                demo_threat = Threat(
+                    name=DEMO_DANGER_NAME,
+                    threat_type="ambush",
+                    severity_level="critical",
+                    status="active",
+                    engagement_status="detected",
+                    radius=DEMO_DANGER_RADIUS,
+                    geom=WKTElement(f"POINT({DEMO_DANGER_LON} {DEMO_DANGER_LAT})", srid=4326),
+                )
+                session.add(demo_threat)
+                await session.commit()
+                await session.refresh(demo_threat)
+                resp = ThreatResponse.from_threat(demo_threat, DEMO_DANGER_LAT, DEMO_DANGER_LON)
+                await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
+            elif demo_threat.status != "active":
+                demo_threat.status = "active"
+                demo_threat.engagement_status = "detected"
+                await session.commit()
+                resp = ThreatResponse.from_threat(demo_threat, DEMO_DANGER_LAT, DEMO_DANGER_LON)
+                await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+
+            # 2. Ensure all configured high-speed drones exist in DB
+            drones_stmt = select(Threat).where(Threat.threat_type == "drone")
+            existing_drones = list((await session.execute(drones_stmt)).scalars().all())
+
+            active_drones = []
+            for cfg in DRONE_CONFIGS:
+                d_match = next((d for d in existing_drones if d.name == cfg["name"]), None)
+                first_pt = cfg["key_points"][0]
+                if not d_match:
+                    d_match = Threat(
+                        name=cfg["name"],
+                        threat_type="drone",
+                        severity_level=cfg["severity"],
+                        status="active",
+                        engagement_status="detected",
+                        radius=cfg["radius"],
+                        altitude=first_pt[2],
+                        geom=WKTElement(f"POINT({first_pt[1]} {first_pt[0]})", srid=4326),
+                    )
+                    session.add(d_match)
+                    await session.commit()
+                    await session.refresh(d_match)
+                    resp = ThreatResponse.from_threat(d_match, first_pt[0], first_pt[1])
+                    await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
+                elif d_match.status != "active":
+                    d_match.status = "active"
+                    d_match.engagement_status = "detected"
+                    await session.commit()
+                    resp = ThreatResponse.from_threat(d_match, first_pt[0], first_pt[1])
+                    await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+                active_drones.append((d_match, cfg))
+
+            # Reload memory threats cache for instant breach checks
+            from app.sockets.server import _ensure_threats_cache_loaded
+            await _ensure_threats_cache_loaded(session)
+
+            # Load squads from DB
             squads_stmt = select(User).where(User.role.in_(["Squad", "SapperSquad"]), User.status == "active")
             squads = (await session.execute(squads_stmt)).scalars().all()
 
-            # Load or create drones from DB
-            drones_stmt = select(Threat).where(Threat.threat_type == "drone", Threat.status == "active")
-            drones = (await session.execute(drones_stmt)).scalars().all()
-
-        # Launch squad simulations
+        # Launch squad simulations (Slow, realistic, and smooth: 5m step, 0.8s delay)
         if mode in ["all", "squads"]:
             for u in squads:
                 key = u.username if u.username in SQUAD_ROUTES else "squad_golani"
-                dense_path = interpolate_route_2d(SQUAD_ROUTES[key], step_meters=25.0)
+                dense_path = interpolate_route_2d(SQUAD_ROUTES[key], step_meters=5.0)
                 task_name = f"squad_{u.username}"
                 self._tasks[task_name] = asyncio.create_task(
-                    self._run_squad_patrol(u.username, u.id, dense_path, delay=1.0)
+                    self._run_squad_patrol(u.username, u.id, dense_path, delay=0.8)
                 )
 
-        # Launch drone simulations
+        # Launch drone simulations (High-speed aerial sweep: 160m step, 0.3s delay)
         if mode in ["all", "drones"]:
-            for i, d in enumerate(drones):
-                cfg = DRONE_CONFIGS[i % len(DRONE_CONFIGS)]
-                dense_path = interpolate_route_3d(cfg["key_points"], step_meters=70.0)
+            for d, cfg in active_drones:
+                dense_path = interpolate_route_3d(cfg["key_points"], step_meters=160.0)
                 task_name = f"drone_{d.id}"
                 self._tasks[task_name] = asyncio.create_task(
-                    self._run_drone_flight(d.id, dense_path, delay=0.5)
+                    self._run_drone_flight(d.id, dense_path, cfg, delay=0.3)
                 )
 
         return self.get_status()
