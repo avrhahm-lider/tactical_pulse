@@ -50,6 +50,11 @@ async def get_current_user(
             message="User account is deactivated / inactive",
         )
 
+    # Touch last_activity_at for rolling inactivity tracking
+    from datetime import datetime, timezone
+    user.last_activity_at = datetime.now(timezone.utc)
+    await session.commit()
+
     return user
 
 

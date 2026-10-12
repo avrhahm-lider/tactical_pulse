@@ -164,8 +164,8 @@ async def location_update(sid: str, data: dict):
     if not client:
         return
 
-    # Only field units can emit location updates
-    if client["role"] not in ["Squad", "SapperSquad", "Radar"]:
+    # Only field combat squads can emit location updates
+    if client["role"] not in ["Squad", "SapperSquad"]:
         return
 
     lat = data.get("lat")

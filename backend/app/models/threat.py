@@ -31,6 +31,11 @@ class Threat(Base):
         ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    created_by_soldier_id = Column(
+        String(7),
+        ForeignKey("soldiers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -79,3 +84,4 @@ class Threat(Base):
 
     assigned_to = relationship("User", foreign_keys=[assigned_to_id], lazy="selectin")
     created_by = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    created_by_soldier = relationship("Soldier", foreign_keys=[created_by_soldier_id], lazy="selectin")

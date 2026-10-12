@@ -83,6 +83,7 @@ async def create_threat(
         radius=req.radius,
         status="active",
         created_by_id=current_user.id,
+        created_by_soldier_id=current_user.soldier_id,
     )
     session.add(new_threat)
     await session.flush()

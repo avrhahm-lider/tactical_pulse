@@ -1,4 +1,6 @@
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Dict, Tuple
 from uuid import UUID
 from fastapi import APIRouter, Depends, Request, status
@@ -122,6 +124,23 @@ async def login(
             message="User account is deactivated / inactive",
         )
 
+    # Check concurrent active session within 10 minutes (600 seconds)
+    now = datetime.now(timezone.utc)
+    if user.is_logged_in and user.last_activity_at:
+        idle_seconds = (now - user.last_activity_at).total_seconds()
+        if idle_seconds < 600.0:
+            remaining_seconds = int(600.0 - idle_seconds)
+            raise AppException(
+                status_code=status.HTTP_409_CONFLICT,
+                code="SESSION_ACTIVE",
+                message=f"User already has an active session. Concurrent login rejected. Retry in {remaining_seconds}s or logout from active session.",
+                details={"remaining_seconds": remaining_seconds},
+            )
+
+    user.is_logged_in = True
+    user.last_activity_at = now
+    user.session_id = uuid.uuid4().hex
+
     record_successful_attempt(req.username, client_ip)
 
     access_token = create_access_token(subject=str(user.id), extra_claims=_user_claims(user))
@@ -211,6 +230,9 @@ async def logout(
     session: AsyncSession = Depends(get_db),
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
+    current_user.is_logged_in = False
+    current_user.session_id = None
+
     await log_audit_event(
         session=session,
         action="logout",
@@ -228,3 +250,31 @@ async def logout(
         print(f"[SOCKET WARNING] Disconnecting sockets on logout failed: {e}")
 
     return MessageResponse(message="Logged out successfully")
+
+
+@router.post("/reset-all-sessions", response_model=MessageResponse)
+async def reset_all_sessions_public(
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+):
+    """
+    Public test/recovery utility to clear all active session locks across all users.
+    Can be called directly from the login page without authentication.
+    """
+    from sqlalchemy import update
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    stmt = update(User).values(is_logged_in=False, session_id=None, last_activity_at=None)
+    res = await session.execute(stmt)
+    count = res.rowcount
+
+    await log_audit_event(
+        session=session,
+        action="public_sessions_reset",
+        user_id=None,
+        resource_type="system",
+        resource_id=None,
+        details={"reset_count": count},
+        ip_address=client_ip,
+    )
+    await session.commit()
+    return MessageResponse(message=f"All active user sessions reset successfully ({count} users unlocked)")

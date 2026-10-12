@@ -8,10 +8,10 @@ class Soldier(Base):
     __tablename__ = "soldiers"
 
     id = Column(String(7), primary_key=True)
-    user_id = Column(
+    squad_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     name = Column(String(100), nullable=False)
@@ -24,4 +24,10 @@ class Soldier(Base):
         ),
     )
 
-    user = relationship("User", back_populates="soldiers")
+    squad = relationship("User", foreign_keys=[squad_id], back_populates="soldiers")
+    user_account = relationship(
+        "User",
+        foreign_keys="User.soldier_id",
+        back_populates="soldier",
+        uselist=False,
+    )

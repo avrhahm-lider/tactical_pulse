@@ -61,11 +61,17 @@ class ThreatResponse(ThreatBase):
     altitude: Optional[float] = None
     status: ThreatStatus
     created_by_id: UUID
+    created_by_soldier_id: Optional[str] = None
+    created_by_soldier_name: Optional[str] = None
+    created_by_unit_name: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
     @classmethod
     def from_threat(cls, threat, lat: float, lon: float) -> "ThreatResponse":
+        soldier_name = threat.created_by_soldier.name if getattr(threat, "created_by_soldier", None) else None
+        unit_name = threat.created_by.name if getattr(threat, "created_by", None) else None
         return cls(
             id=threat.id,
             name=threat.name,
@@ -81,6 +87,9 @@ class ThreatResponse(ThreatBase):
             altitude=threat.altitude,
             status=threat.status,
             created_by_id=threat.created_by_id,
+            created_by_soldier_id=threat.created_by_soldier_id,
+            created_by_soldier_name=soldier_name,
+            created_by_unit_name=unit_name,
             created_at=threat.created_at,
             updated_at=threat.updated_at,
         )

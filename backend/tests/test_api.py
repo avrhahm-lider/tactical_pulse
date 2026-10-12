@@ -219,7 +219,11 @@ async def test_map_snapshot():
         snapshot = snap_res.json()
         assert "squads" in snapshot
         assert "threats" in snapshot
-        assert len(snapshot["squads"]) >= 3
+        assert len(snapshot["squads"]) >= 2
+        # Ensure radars and command centers are NOT exposed in squad locations
+        for s in snapshot["squads"]:
+            assert s["role"] in ["Squad", "SapperSquad"]
+            assert s["role"] not in ["Radar", "AreaCommandCenter", "MainCommandCenter"]
         assert len(snapshot["threats"]) >= 2
 
 
@@ -322,4 +326,108 @@ async def test_drone_altitude_rbac_protection():
         )
         assert patch_res.status_code == 403
         assert patch_res.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_single_active_session_and_reset():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. First login succeeds
+        login_1 = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        assert login_1.status_code == 200
+        admin_token = login_1.json()["access_token"]
+        headers = {"Authorization": f"Bearer {admin_token}"}
+
+        # 2. Concurrent login with same user without logout is rejected (409 Conflict)
+        login_2 = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        assert login_2.status_code == 409
+        assert login_2.json()["error"]["code"] == "SESSION_ACTIVE"
+
+        # 3. Explicit logout frees session
+        logout_res = await client.post("/api/v1/auth/logout", headers=headers)
+        assert logout_res.status_code == 200
+
+        # 4. Login now succeeds again
+        login_3 = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        assert login_3.status_code == 200
+        admin_token_2 = login_3.json()["access_token"]
+        headers_2 = {"Authorization": f"Bearer {admin_token_2}"}
+
+        # 5. Test public unauthenticated reset all sessions endpoint (from login screen)
+        pub_reset = await client.post("/api/v1/auth/reset-all-sessions")
+        assert pub_reset.status_code == 200
+        assert "All active user sessions reset successfully" in pub_reset.json()["message"]
+
+        # 6. Test admin reset all sessions endpoint
+        reset_all = await client.post("/api/v1/admin/users/reset-all-sessions", headers=headers_2)
+        assert reset_all.status_code == 200
+        assert "All active user sessions reset" in reset_all.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_soldiers_crud_and_attribution():
+    transport = ASGITransport(app=fastapi_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Login as Admin
+        admin_login = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        # 1. Create soldier in registry
+        soldier_payload = {
+            "id": "7777001",
+            "name": "Barak Raz",
+            "role": "recon",
+        }
+        create_res = await client.post("/api/v1/admin/soldiers", json=soldier_payload, headers=headers)
+        assert create_res.status_code == 201
+        created_soldier = create_res.json()
+        assert created_soldier["id"] == "7777001"
+        assert created_soldier["name"] == "Barak Raz"
+
+        # 2. Get soldier
+        get_res = await client.get("/api/v1/admin/soldiers/7777001", headers=headers)
+        assert get_res.status_code == 200
+        assert get_res.json()["name"] == "Barak Raz"
+
+        # 3. Update soldier
+        patch_res = await client.patch(
+            "/api/v1/admin/soldiers/7777001",
+            json={"role": "commander"},
+            headers=headers,
+        )
+        assert patch_res.status_code == 200
+        assert patch_res.json()["role"] == "commander"
+
+        # 4. List soldiers
+        list_res = await client.get("/api/v1/admin/soldiers", headers=headers)
+        assert list_res.status_code == 200
+        soldiers = list_res.json()
+        assert any(s["id"] == "7777001" for s in soldiers)
+
+        # 5. Delete soldier
+        del_res = await client.delete("/api/v1/admin/soldiers/7777001", headers=headers)
+        assert del_res.status_code == 200
+
+        # 6. Check threat attribution
+        threats_res = await client.get("/api/v1/threats", headers=headers)
+        assert threats_res.status_code == 200
+        threats = threats_res.json()
+        assert len(threats) >= 1
+        first_threat = threats[0]
+        assert "created_by_soldier_id" in first_threat
+        assert "created_by_soldier_name" in first_threat
+        assert "created_by_unit_name" in first_threat
+        assert first_threat["created_by_unit_name"] is not None
 
