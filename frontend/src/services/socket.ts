@@ -82,8 +82,23 @@ export function disconnectSocket(): void {
   }
 }
 
-export function emitLocationUpdate(lat: number, lon: number, heading: number): void {
+export function emitLocationUpdate(lat: number, lon: number, heading: number, squadId?: string): void {
   if (socket?.connected) {
-    socket.emit('location_update', { lat, lon, heading })
+    const payload: { lat: number; lon: number; heading: number; squad_id?: string } = { lat, lon, heading }
+    if (squadId) {
+      payload.squad_id = squadId
+    }
+    socket.emit('location_update', payload)
+  }
+}
+
+export function emitDroneLocationUpdate(threatId: string, lat: number, lon: number, altitude: number): void {
+  if (socket?.connected) {
+    socket.emit('drone_location_update', {
+      threat_id: threatId,
+      lat,
+      lon,
+      altitude,
+    })
   }
 }

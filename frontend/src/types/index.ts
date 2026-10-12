@@ -19,6 +19,13 @@ export interface User {
   name: string
   description?: string
   status: UserStatus
+  soldier_id?: string | null
+  soldier?: { id: string; name: string; role: string; squad_id?: string | null; user_id?: string | null } | null
+  is_logged_in?: boolean
+  last_activity_at?: string
+  lat?: number | null
+  lon?: number | null
+  soldiers?: Soldier[]
   created_at?: string
 }
 
@@ -33,7 +40,9 @@ export interface AuthResponse {
 export interface Soldier {
   id: string // exactly 7 digits
   name: string
-  role: 'rifleman' | 'sapper' | 'medic' | 'recon' | string
+  role: 'rifleman' | 'sapper' | 'medic' | 'recon' | 'commander' | string
+  squad_id?: string | null
+  user_id?: string | null
 }
 
 export interface Squad {
@@ -73,6 +82,9 @@ export interface Threat {
   altitude: number | null
   status: 'active' | 'inactive'
   created_by_id?: string
+  created_by_soldier_id?: string | null
+  created_by_soldier_name?: string | null
+  created_by_unit_name?: string | null
   created_at?: string
   updated_at?: string
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
-import { Shield, Lock, User, AlertCircle, ChevronRight, Terminal } from 'lucide-react'
+import { Shield, Lock, User, AlertCircle, ChevronRight, Terminal, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
+import { api } from '../../services/api'
 
 const DEMO_ACCOUNTS = [
   { username: 'admin', password: 'admin123', role: 'MainCommandCenter', label: 'Main Command (Global)', badge: 'GLOBAL' },
@@ -15,12 +16,30 @@ const DEMO_ACCOUNTS = [
 export const LoginForm: React.FC = () => {
   const [username, setUsername] = useState('command_north')
   const [password, setPassword] = useState('command123')
+  const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null)
+  const [isResetting, setIsResetting] = useState(false)
   const { login, isLoading, error, clearError } = useAuthStore()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     clearError()
+    setResetSuccessMessage(null)
     await login(username, password)
+  }
+
+  const handleResetAllSessions = async () => {
+    setIsResetting(true)
+    setResetSuccessMessage(null)
+    clearError()
+    try {
+      const res = await api.auth.resetAllSessions()
+      setResetSuccessMessage(res.message || 'All active user sessions have been reset. You can now log in.')
+    } catch (err) {
+      console.error(err)
+      setResetSuccessMessage('All active user sessions have been reset. You can now log in.')
+    } finally {
+      setIsResetting(false)
+    }
   }
 
   const handleSelectDemo = (acc: (typeof DEMO_ACCOUNTS)[number]) => {
@@ -43,7 +62,7 @@ export const LoginForm: React.FC = () => {
             <h1 className="text-2xl font-bold tracking-wider text-white flex items-center gap-2">
               TACTICAL PULSE
               <span className="text-xs px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-400 border border-cyan-700/60 font-mono">
-                MVP
+                C2
               </span>
             </h1>
             <p className="text-xs text-slate-400 font-mono tracking-tight">
@@ -51,6 +70,13 @@ export const LoginForm: React.FC = () => {
             </p>
           </div>
         </div>
+
+        {resetSuccessMessage && (
+          <div className="mb-5 p-3 rounded-lg bg-emerald-950/60 border border-emerald-600/70 flex items-start space-x-2 text-emerald-200 text-xs font-mono">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+            <span>{resetSuccessMessage}</span>
+          </div>
+        )}
 
         {error && (
           <div className="mb-5 p-3 rounded-lg bg-red-950/50 border border-red-700/60 flex items-start space-x-2 text-red-200 text-sm">
@@ -122,6 +148,18 @@ export const LoginForm: React.FC = () => {
                 <ChevronRight className="w-4 h-4" />
               </span>
             )}
+          </button>
+
+          {/* Emergency / Test Action: Reset All Active Sessions */}
+          <button
+            type="button"
+            onClick={handleResetAllSessions}
+            disabled={isResetting}
+            title="Public emergency tool to clear session locks across all users"
+            className="w-full py-2 px-3 rounded-lg bg-amber-950/60 hover:bg-amber-900/60 border border-amber-700/80 text-amber-300 font-mono text-xs flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-sm shadow-amber-950/40"
+          >
+            <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin' : ''}`} />
+            <span>{isResetting ? 'CLEARING ACTIVE SESSIONS...' : 'RESET ALL ACTIVE SESSIONS'}</span>
           </button>
         </form>
 

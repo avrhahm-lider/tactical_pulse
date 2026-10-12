@@ -220,6 +220,19 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
             </div>
           )}
 
+          {/* Author / Soldier Attribution Display */}
+          {(threat.created_by_soldier_name || threat.created_by_unit_name) && (
+            <div className="p-2.5 rounded bg-slate-900/60 border border-slate-800 text-[11px] text-slate-300">
+              <span className="text-[10px] text-slate-500 block uppercase font-mono">THREAT ATTRIBUTION</span>
+              <span className="font-mono text-cyan-300 font-semibold">
+                Reported by:{' '}
+                {threat.created_by_soldier_name
+                  ? `${threat.created_by_soldier_name} (ID: ${threat.created_by_soldier_id || 'N/A'}) - ${threat.created_by_unit_name || 'Duty Desk'}`
+                  : threat.created_by_unit_name || 'Authorized Unit'}
+              </span>
+            </div>
+          )}
+
           {assignedSquad && (
             <div className="p-3 rounded-lg bg-amber-950/30 border border-amber-800/60 text-amber-300 flex items-center space-x-2">
               <UserCheck className="w-4 h-4 shrink-0" />

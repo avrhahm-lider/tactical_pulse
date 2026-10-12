@@ -48,6 +48,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (!axiosErr.response) {
         // No HTTP response was received — server is offline, port is closed, or CORS failed
         message = `Cannot reach backend server at http://localhost:8000 (${axiosErr.code || 'ERR_CONNECTION_REFUSED'}). Is the FastAPI backend running?`
+      } else if (axiosErr.response.data?.error?.code === 'SESSION_ACTIVE' || axiosErr.response.status === 409) {
+        message = "Account is active in another session. Use 'Reset All Sessions' button on the login screen or wait 10 min."
       } else if (axiosErr.response.data?.error?.message) {
         message = `${axiosErr.response.data.error.message} (${axiosErr.response.status})`
       } else if (axiosErr.response.status === 401) {

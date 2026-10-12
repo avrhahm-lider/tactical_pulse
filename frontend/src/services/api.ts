@@ -89,6 +89,10 @@ export const api = {
         localStorage.removeItem('refresh_token')
       }
     },
+    resetAllSessions: async (): Promise<{ message: string }> => {
+      const res = await axios.post<{ message: string }>(`${API_BASE_URL}/auth/reset-all-sessions`)
+      return res.data
+    },
   },
 
   map: {
@@ -120,6 +124,30 @@ export const api = {
     },
     updateStatus: async (userId: string, status: 'active' | 'inactive'): Promise<User> => {
       const res = await apiClient.patch<User>(`/admin/users/${userId}/status`, { status })
+      return res.data
+    },
+    resetAllSessions: async (): Promise<{ message: string }> => {
+      const res = await apiClient.post<{ message: string }>('/admin/users/reset-all-sessions')
+      return res.data
+    },
+    resetUserSession: async (userId: string): Promise<{ message: string }> => {
+      const res = await apiClient.post<{ message: string }>(`/admin/users/${userId}/reset-session`)
+      return res.data
+    },
+    getSoldiers: async (params?: { squad_id?: string; has_user?: boolean }): Promise<any[]> => {
+      const res = await apiClient.get('/admin/soldiers', { params })
+      return res.data
+    },
+    createSoldier: async (payload: { id: string; name: string; role: string; squad_id?: string | null }): Promise<any> => {
+      const res = await apiClient.post('/admin/soldiers', payload)
+      return res.data
+    },
+    updateSoldier: async (soldierId: string, payload: Partial<{ name: string; role: string; squad_id: string | null }>): Promise<any> => {
+      const res = await apiClient.patch(`/admin/soldiers/${soldierId}`, payload)
+      return res.data
+    },
+    deleteSoldier: async (soldierId: string): Promise<any> => {
+      const res = await apiClient.delete(`/admin/soldiers/${soldierId}`)
       return res.data
     },
   },
