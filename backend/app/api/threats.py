@@ -27,6 +27,67 @@ from app.sockets.server import broadcast_threat_event
 router = APIRouter(prefix="/threats", tags=["Threats Management"])
 
 
+# =========================================================================
+# RBAC PERMISSION HELPERS
+# =========================================================================
+
+def _is_command_center(user: User) -> bool:
+    return user.role in ("MainCommandCenter", "AreaCommandCenter")
+
+
+def _can_control_drone(user: User) -> bool:
+    return user.role == "Radar" or _is_command_center(user)
+
+
+def _validate_resolve_permission(threat: Threat, user: User, is_field_unit: bool) -> None:
+    if threat.threat_type == "drone":
+        if not _can_control_drone(user):
+            raise AppException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="FORBIDDEN",
+                message="Only Radar units or Command Center can confirm that an enemy drone has been shot down",
+            )
+    elif threat.threat_type == "explosive":
+        if user.role != "SapperSquad" and not _is_command_center(user):
+            raise AppException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="FORBIDDEN",
+                message="Only SapperSquad (EOD) or Command Center can resolve explosive hazards",
+            )
+    elif is_field_unit and threat.assigned_to_id != user.id and not _is_command_center(user):
+        raise AppException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message="Only the assigned squad or Command Center can resolve this threat",
+        )
+
+
+def _validate_deactivate_permission(threat: Threat, user: User, is_field_unit: bool) -> None:
+    if threat.threat_type == "drone":
+        if not _can_control_drone(user):
+            raise AppException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="FORBIDDEN",
+                message="Only Radar units or Command Center can report that a drone has been destroyed and deactivate its track",
+            )
+    elif threat.engagement_status == "in_progress":
+        raise AppException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_REQUEST",
+            message="Cannot deactivate a threat currently in progress",
+        )
+    elif is_field_unit and threat.assigned_to_id != user.id and not _is_command_center(user):
+        raise AppException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message="Field squads can only deactivate threats assigned to them",
+        )
+
+
+# =========================================================================
+# THREATS ENDPOINTS
+# =========================================================================
+
 @router.get("", response_model=list[ThreatResponse])
 async def list_threats(
     status_filter: str | None = "active",
@@ -43,16 +104,13 @@ async def list_threats(
         status_filter=status_filter,
         include_resolved=include_resolved,
     )
-
     if engagement_status:
         stmt = stmt.where(Threat.engagement_status == engagement_status)
     if threat_type:
         stmt = stmt.where(Threat.threat_type == threat_type)
 
     stmt = stmt.order_by(Threat.updated_at.desc())
-    result = await session.execute(stmt)
-    rows = result.all()
-
+    rows = (await session.execute(stmt)).all()
     return [ThreatResponse.from_threat(t, lat, lon) for t, lat, lon in rows]
 
 
@@ -65,7 +123,6 @@ async def create_threat(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    # 1. RBAC Creation Matrix
     if req.threat_type == "explosive" and current_user.role == "Radar":
         raise AppException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -73,28 +130,23 @@ async def create_threat(
             message="Radar units cannot report explosive IED hazards",
         )
 
-    # 2. AreaCommandCenter Zone Restriction
-    if current_user.role == "AreaCommandCenter":
-        if not is_lat_in_area(req.lat, current_user.area):
-            raise AppException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="FORBIDDEN",
-                message=f"AreaCommandCenter '{current_user.area}' can only create threats within its operational sector",
-            )
+    if current_user.role == "AreaCommandCenter" and not is_lat_in_area(req.lat, current_user.area):
+        raise AppException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="FORBIDDEN",
+            message=f"AreaCommandCenter '{current_user.area}' can only create threats within its operational sector",
+        )
 
-    # 3. Attribution: Determine the reporting soldier/operator
+    # Resolve reporting soldier ID
     reporting_soldier_id = None
     if req.soldier_id:
-        s_stmt = select(Soldier).where(Soldier.id == req.soldier_id)
-        s_res = await session.execute(s_stmt)
-        soldier = s_res.scalar_one_or_none()
+        soldier = (await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))).scalar_one_or_none()
         if not soldier:
             raise AppException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 code="NOT_FOUND",
                 message=f"Reporting soldier with ID '{req.soldier_id}' not found",
             )
-        # Verify soldier belongs to this command center / unit (MainCommandCenter can attribute to any soldier)
         if (
             current_user.role != "MainCommandCenter"
             and soldier.squad_id != current_user.id
@@ -157,13 +209,9 @@ async def update_threat(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    stmt = select(
-        Threat,
-        ST_Y(Threat.geom).label("lat"),
-        ST_X(Threat.geom).label("lon"),
-    ).where(Threat.id == threat_id)
-    result = await session.execute(stmt)
-    row = result.first()
+    row = (await session.execute(
+        select(Threat, ST_Y(Threat.geom).label("lat"), ST_X(Threat.geom).label("lon")).where(Threat.id == threat_id)
+    )).first()
 
     if not row:
         raise AppException(
@@ -174,7 +222,7 @@ async def update_threat(
 
     threat, current_lat, current_lon = row
 
-    # 1. AreaCommandCenter Zone Restriction
+    # Sector restrictions for AreaCommandCenter
     if current_user.role == "AreaCommandCenter":
         if not is_lat_in_area(current_lat, current_user.area):
             raise AppException(
@@ -189,36 +237,33 @@ async def update_threat(
                 message=f"AreaCommandCenter '{current_user.area}' cannot relocate threats outside its assigned sector",
             )
 
-    # 2. Field Unit Proximity Restriction (20 km for ground tactical units; radar monitors aerial drones)
-    is_field_unit = current_user.role in ["Squad", "SapperSquad"]
-    is_radar_drone_update = current_user.role == "Radar" and threat.threat_type == "drone"
-    caller_coords = await get_caller_coordinates(session, current_user.id)
-    if is_field_unit or (current_user.role == "Radar" and not is_radar_drone_update):
+    # 20 km operational proximity restriction for field tactical units
+    is_field_unit = current_user.role in ("Squad", "SapperSquad")
+    is_radar_drone = current_user.role == "Radar" and threat.threat_type == "drone"
+    if is_field_unit or (current_user.role == "Radar" and not is_radar_drone):
+        caller_coords = await get_caller_coordinates(session, current_user.id)
         if not caller_coords:
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
                 message="Field unit position is unknown. Cannot perform tactical actions on threats.",
             )
-        caller_lat, caller_lon = caller_coords
-        # Verify 20 km distance
+        c_lat, c_lon = caller_coords
         dist_stmt = select(
             ST_DWithin(
                 cast(Threat.geom, Geography),
-                cast(ST_SetSRID(ST_MakePoint(caller_lon, caller_lat), 4326), Geography),
+                cast(ST_SetSRID(ST_MakePoint(c_lon, c_lat), 4326), Geography),
                 settings.VISIBILITY_RADIUS_METERS,
             )
         ).where(Threat.id == threat.id)
-        dist_res = await session.execute(dist_stmt)
-        is_within_range = dist_res.scalar()
-        if not is_within_range:
+        if not (await session.execute(dist_stmt)).scalar():
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
                 message="Threat is outside unit's 20 km tactical operating radius",
             )
 
-    # 3. Concurrency Control & Self-Assignment
+    # Engagement status transitions
     if req.engagement_status == "in_progress":
         if threat.engagement_status != "unassigned":
             raise AppException(
@@ -227,67 +272,33 @@ async def update_threat(
                 message="This threat is already being handled by another squad",
                 details={"assigned_to_id": str(threat.assigned_to_id)},
             )
-        # Radar cannot take responsibility
         if current_user.role == "Radar":
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
                 message="Radar units cannot take direct responsibility for engaging threats",
             )
-        # Explosive IEDs can only be engaged by SapperSquad or Command Center
-        if threat.threat_type == "explosive" and current_user.role not in ["SapperSquad", "MainCommandCenter", "AreaCommandCenter"]:
+        if threat.threat_type == "explosive" and current_user.role != "SapperSquad" and not _is_command_center(current_user):
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
                 message="Only SapperSquad (EOD) or Command Center can engage explosive threats",
             )
-        # Field squads can only assign to themselves
-        if is_field_unit:
-            threat.assigned_to_id = current_user.id
-        elif req.assigned_to_id is not None:
-            threat.assigned_to_id = req.assigned_to_id
-        else:
-            threat.assigned_to_id = current_user.id
+        threat.assigned_to_id = current_user.id if is_field_unit or req.assigned_to_id is None else req.assigned_to_id
         threat.engagement_status = "in_progress"
 
     elif req.engagement_status == "resolved":
-        # Drone threats: Radar OR Command Center can confirm drone is destroyed/shot down!
+        _validate_resolve_permission(threat, current_user, is_field_unit)
+        threat.engagement_status = "resolved"
+        threat.status = "inactive"
         if threat.threat_type == "drone":
-            if current_user.role not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
-                raise AppException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    code="FORBIDDEN",
-                    message="Only Radar units or Command Center can confirm that an enemy drone has been shot down",
-                )
-            threat.engagement_status = "resolved"
-            threat.status = "inactive"
             simulator_engine.stop_drone(threat.id)
-        # Explosive IEDs can only be resolved by SapperSquad or Command Center
-        elif threat.threat_type == "explosive":
-            if current_user.role not in ["SapperSquad", "MainCommandCenter", "AreaCommandCenter"]:
-                raise AppException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    code="FORBIDDEN",
-                    message="Only SapperSquad or Command Center can resolve explosive hazards",
-                )
-            threat.engagement_status = "resolved"
-            threat.status = "inactive"
-        # Regular movable threats: assigned squad or command center
-        else:
-            if is_field_unit and threat.assigned_to_id != current_user.id and current_user.role not in ["MainCommandCenter", "AreaCommandCenter"]:
-                raise AppException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    code="FORBIDDEN",
-                    message="Only the assigned squad or Command Center can resolve this threat",
-                )
-            threat.engagement_status = "resolved"
-            threat.status = "inactive"
 
     elif req.engagement_status == "unassigned":
         threat.engagement_status = "unassigned"
         threat.assigned_to_id = None
 
-    # 4. Coordinate Update Validation
+    # Coordinate & altitude updates
     new_lat = current_lat
     new_lon = current_lon
     if req.lat is not None or req.lon is not None:
@@ -297,7 +308,7 @@ async def update_threat(
                 code="INVALID_REQUEST",
                 message="Immovable threats (IED/minefield) are fixed and cannot be repositioned",
             )
-        if threat.threat_type == "drone" and current_user.role not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
+        if threat.threat_type == "drone" and not _can_control_drone(current_user):
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
@@ -314,7 +325,7 @@ async def update_threat(
                 code="INVALID_REQUEST",
                 message="Altitude can only be specified for aerial drone threats",
             )
-        if current_user.role not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
+        if not _can_control_drone(current_user):
             raise AppException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="FORBIDDEN",
@@ -322,39 +333,17 @@ async def update_threat(
             )
         threat.altitude = req.altitude
 
-    # 5. Lifecycle Deactivation
+    # Lifecycle deactivation
     if req.status == "inactive":
+        _validate_deactivate_permission(threat, current_user, is_field_unit)
+        threat.status = "inactive"
+        threat.engagement_status = "resolved"
         if threat.threat_type == "drone":
-            if current_user.role not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
-                raise AppException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    code="FORBIDDEN",
-                    message="Only Radar units or Command Center can report that a drone has been destroyed and deactivate its track",
-                )
-            threat.status = "inactive"
-            threat.engagement_status = "resolved"
             simulator_engine.stop_drone(threat.id)
-        elif threat.engagement_status == "in_progress":
-            raise AppException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                code="INVALID_REQUEST",
-                message="Cannot deactivate a threat currently in progress",
-            )
-        elif is_field_unit and threat.assigned_to_id != current_user.id:
-            raise AppException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="FORBIDDEN",
-                message="Field squads can only deactivate threats assigned to them",
-            )
-        else:
-            threat.status = "inactive"
-            threat.engagement_status = "resolved"
-            if threat.threat_type == "drone":
-                simulator_engine.stop_drone(threat.id)
     elif req.status == "active":
         threat.status = "active"
 
-    # Optional metadata updates
+    # Optional metadata
     if req.severity_level:
         threat.severity_level = req.severity_level
     if req.description is not None:
@@ -362,8 +351,8 @@ async def update_threat(
     if req.radius:
         threat.radius = req.radius
 
-    audit_action = "threat_resolved" if req.engagement_status == "resolved" else (
-        "threat_deactivated" if req.status == "inactive" else "threat_updated"
+    audit_action = "threat_resolved" if threat.engagement_status == "resolved" else (
+        "threat_deactivated" if threat.status == "inactive" else "threat_updated"
     )
     await log_audit_event(
         session=session,

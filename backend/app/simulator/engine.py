@@ -177,9 +177,6 @@ def interpolate_route(key_points: list, step_meters: float = 1.0) -> list:
     return dense
 
 
-interpolate_route_2d = interpolate_route
-interpolate_route_3d = interpolate_route
-
 
 def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     d_lon = math.radians(lon2 - lon1)
@@ -513,14 +510,14 @@ class SimulatorEngine:
                         created_by_soldier_id=creator_soldier_id,
                     )
                     session.add(threat)
-                    await session.commit()
+                    await session.flush()
                     await session.refresh(threat)
                     resp = ThreatResponse.from_threat(threat, gt["lat"], gt["lon"])
                     await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
                 elif threat.status != "active":
                     threat.status = "active"
                     threat.engagement_status = "unassigned"
-                    await session.commit()
+                    await session.flush()
                     resp = ThreatResponse.from_threat(threat, gt["lat"], gt["lon"])
                     await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
 
@@ -547,14 +544,14 @@ class SimulatorEngine:
                         created_by_soldier_id=creator_soldier_id,
                     )
                     session.add(d_match)
-                    await session.commit()
+                    await session.flush()
                     await session.refresh(d_match)
                     resp = ThreatResponse.from_threat(d_match, first_pt[0], first_pt[1])
                     await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
                 elif d_match.status != "active":
                     d_match.status = "active"
                     d_match.engagement_status = "unassigned"
-                    await session.commit()
+                    await session.flush()
                     resp = ThreatResponse.from_threat(d_match, first_pt[0], first_pt[1])
                     await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
                 active_drones.append((d_match, cfg))
@@ -622,7 +619,7 @@ class SimulatorEngine:
             for u, sc in active_squad_users:
                 speed_kmh = sc.get("speed_kmh", 40.0)
                 step_m = max(0.2, (speed_kmh / 3.6) * 0.25)
-                dense_path = interpolate_route_2d(sc["route"], step_meters=step_m)
+                dense_path = interpolate_route(sc["route"], step_meters=step_m)
                 task_name = f"squad_{u.username}"
                 self._tasks[task_name] = asyncio.create_task(
                     self._run_squad_patrol(u.username, u.id, dense_path, delay=0.25)
@@ -633,7 +630,7 @@ class SimulatorEngine:
             for d, cfg in active_drones:
                 speed_kmh = cfg.get("speed_kmh", 100.0)
                 step_m = max(0.5, (speed_kmh / 3.6) * 0.25)
-                dense_path = interpolate_route_3d(cfg["key_points"], step_meters=step_m)
+                dense_path = interpolate_route(cfg["key_points"], step_meters=step_m)
                 task_name = f"drone_{d.id}"
                 self._tasks[task_name] = asyncio.create_task(
                     self._run_drone_flight(d.id, dense_path, cfg, delay=0.25)

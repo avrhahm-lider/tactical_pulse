@@ -209,6 +209,10 @@ async def seed_database() -> None:
                     created_by_soldier_id="9990003",
                 )
             )
+        else:
+            t_ied.status = "active"
+            t_ied.engagement_status = "unassigned"
+            t_ied.assigned_to_id = None
 
         t_drone = (await session.execute(select(Threat).where(Threat.name == "Hostile Recon Drone"))).scalar_one_or_none()
         if not t_drone:
@@ -230,6 +234,10 @@ async def seed_database() -> None:
                     created_by_soldier_id="3000001",
                 )
             )
+        else:
+            t_drone.status = "active"
+            t_drone.engagement_status = "unassigned"
+            t_drone.assigned_to_id = None
 
         # 6. Audit log entry
         admin_obj = user_map["admin"]
