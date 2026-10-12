@@ -106,6 +106,67 @@ body {
   animation: threat-pulse 1.8s ease-in-out infinite;
 }
 
+/* Threat Danger Zone Red Pulse Animations (Leaflet SVG & Tactical Overlays) */
+@keyframes threat-red-zone-pulse {
+  0% {
+    fill-opacity: 0.14;
+    stroke-opacity: 0.5;
+    stroke-width: 1.5px;
+  }
+  50% {
+    fill-opacity: 0.44;
+    stroke-opacity: 1;
+    stroke-width: 3.5px;
+    filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.9));
+  }
+  100% {
+    fill-opacity: 0.14;
+    stroke-opacity: 0.5;
+    stroke-width: 1.5px;
+  }
+}
+
+.threat-zone-red-pulse {
+  animation: threat-red-zone-pulse 2s ease-in-out infinite !important;
+  transform-origin: center;
+}
+
+@keyframes threat-red-zone-intrusion-pulse {
+  0% {
+    fill-opacity: 0.25;
+    stroke-opacity: 0.6;
+    stroke-width: 2px;
+  }
+  50% {
+    fill-opacity: 0.65;
+    stroke-opacity: 1;
+    stroke-width: 5px;
+    filter: drop-shadow(0 0 18px rgba(255, 0, 51, 1));
+  }
+  100% {
+    fill-opacity: 0.25;
+    stroke-opacity: 0.6;
+    stroke-width: 2px;
+  }
+}
+
+.threat-zone-intrusion-pulse {
+  animation: threat-red-zone-intrusion-pulse 0.8s ease-in-out infinite !important;
+  transform-origin: center;
+}
+
+/* Expanding Radar Sonar Waves for Threat Red Zones */
+@keyframes danger-sonar-ring {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.4);
+    opacity: 0;
+  }
+}
+
 /* Tactical Leaflet Map styling overrides */
 .leaflet-container {
   width: 100%;

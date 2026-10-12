@@ -8,8 +8,8 @@ import {
   UserCheck,
   Compass,
   MapPin,
-  Radar,
 } from 'lucide-react'
+import { DroneIcon } from '../Common/DroneIcon'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { api } from '../../services/api'
@@ -31,17 +31,37 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
 
   const isCommandCenter =
     user?.role === 'MainCommandCenter' || user?.role === 'AreaCommandCenter'
+  const isRegionalTOC = isCommandCenter
   const isSapper = user?.role === 'SapperSquad'
   const isRadar = user?.role === 'Radar'
 
-  // RBAC checks matching API_CONTRACT.md Section 2
-  const canEngageExplosive = isSapper || isCommandCenter
-  const canEngageThisThreat =
-    threat.threat_type === 'explosive'
-      ? canEngageExplosive
-      : threat.threat_type === 'drone'
-      ? !isRadar || isCommandCenter
-      : true
+  // EOD Specialist detection: Sapper squad role, or soldier with sapper role in team, or command center
+  const hasEODSpecialist =
+    isSapper ||
+    Boolean(user?.soldiers?.some((s) => s.role === 'sapper')) ||
+    Boolean(user?.soldier?.role === 'sapper') ||
+    isCommandCenter
+
+  const [customRadius, setCustomRadius] = useState<number>(threat.radius || 150)
+  const [isSavingRadius, setIsSavingRadius] = useState<boolean>(false)
+  const [radiusSuccessMsg, setRadiusSuccessMsg] = useState<string | null>(null)
+
+  const handleUpdateDangerRadius = async () => {
+    if (!customRadius || customRadius < 10) return
+    setIsSavingRadius(true)
+    setRadiusSuccessMsg(null)
+    try {
+      const updated = await api.threats.update(threat.id, { radius: customRadius })
+      addOrUpdateThreat(updated, user?.id)
+      setRadiusSuccessMsg(`Danger zone radius successfully set to ${customRadius}m`)
+      setTimeout(() => setRadiusSuccessMsg(null), 3000)
+    } catch (err: unknown) {
+      console.error('Failed to update radius', err)
+      setErrorMessage('Failed to update danger zone radius.')
+    } finally {
+      setIsSavingRadius(false)
+    }
+  }
 
   const assignedSquad = threat.assigned_to_id
     ? squads[threat.assigned_to_id]
@@ -157,7 +177,11 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center space-x-3">
             <div className="p-2.5 rounded-lg bg-red-950/80 border border-red-600 text-red-400">
-              <AlertTriangle className="w-5 h-5" />
+              {threat.threat_type === 'drone' ? (
+                <DroneIcon size={20} className="text-red-400 animate-pulse" />
+              ) : (
+                <AlertTriangle className="w-5 h-5" />
+              )}
             </div>
             <div>
               <h2 className="text-base font-bold text-white font-mono tracking-wide">
@@ -243,61 +267,117 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Administrator Danger Zone Definition (Applicable to both moving & stationary threats) */}
+          {isCommandCenter && (
+            <div className="mt-4 p-3 rounded-lg bg-slate-900/90 border border-cyan-800/60 font-mono">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>ADMINISTRATOR THREAT ZONE DEFINITION</span>
+                </span>
+                <span className="text-[10px] text-slate-400 uppercase">
+                  [{threat.type === 'movable' ? 'MOVING THREAT' : 'STATIONARY THREAT'}]
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 mb-2">
+                Set operational danger zone radius (X meters) to designate the active red hazard buffer.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="10"
+                  max="5000"
+                  value={customRadius}
+                  onChange={(e) => setCustomRadius(Number(e.target.value))}
+                  className="w-28 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-white text-xs font-mono focus:border-cyan-500 focus:outline-none"
+                />
+                <span className="text-xs text-slate-400">m</span>
+                <div className="flex gap-1">
+                  {[100, 150, 300, 500].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setCustomRadius(preset)}
+                      className={`text-[9px] px-1.5 py-0.5 rounded border ${
+                        customRadius === preset
+                          ? 'bg-cyan-950 border-cyan-500 text-cyan-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {preset}m
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={handleUpdateDangerRadius}
+                  disabled={isSavingRadius}
+                  className="ml-auto px-3 py-1 rounded bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold font-mono transition-all cursor-pointer shadow"
+                >
+                  {isSavingRadius ? 'SAVING...' : 'APPLY ZONE'}
+                </button>
+              </div>
+              {radiusSuccessMsg && (
+                <div className="mt-1.5 text-[10px] text-emerald-400 font-bold">
+                  ✓ {radiusSuccessMsg}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Tactical Actions (RBAC Enforced) */}
-        <div className="mt-6 pt-4 border-t border-slate-800 flex flex-wrap gap-2 justify-end">
-          {/* DRONE THREATS: ONLY RADAR CAN REPORT DRONE DESTROYED / ARCHIVE */}
+        {/* Tactical Actions (RBAC Enforced: EOD handles, TOC manager removes) */}
+        <div className="mt-6 pt-4 border-t border-slate-800 flex flex-wrap gap-2 justify-end items-center">
+          {/* DRONE THREATS: RADAR DESTROYS, REGIONAL TOC REMOVES */}
           {threat.threat_type === 'drone' ? (
-            isRadar ? (
-              <>
-                {threat.engagement_status !== 'resolved' && (
-                  <button
-                    onClick={handleResolve}
-                    disabled={isLoading}
-                    className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
-                  >
-                    <CheckCircle className="w-3.5 h-3.5" />
-                    <span>CONFIRM DRONE DESTROYED</span>
-                  </button>
-                )}
+            <>
+              {isRadar && threat.engagement_status !== 'resolved' && (
+                <button
+                  onClick={handleResolve}
+                  disabled={isLoading}
+                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>CONFIRM DRONE DESTROYED</span>
+                </button>
+              )}
+              {isRegionalTOC ? (
                 <button
                   onClick={handleArchive}
                   disabled={isLoading}
-                  className="px-3.5 py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs flex items-center space-x-1.5 border border-slate-700 transition-colors cursor-pointer"
+                  className="px-3.5 py-2 rounded bg-red-950/80 hover:bg-red-900 border border-red-700 text-red-200 font-mono text-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
                 >
                   <Archive className="w-3.5 h-3.5" />
-                  <span>DEACTIVATE DRONE TRACK</span>
+                  <span>REMOVE / ARCHIVE DRONE TRACK</span>
                 </button>
-              </>
-            ) : (
-              <div className="px-3 py-2 rounded bg-slate-900/90 border border-slate-700 text-cyan-400 font-mono text-xs flex items-center space-x-2">
-                <Radar className="w-4 h-4 text-cyan-400" />
-                <span>ONLY RADAR CAN REPORT DRONE DESTROYED</span>
-              </div>
-            )
+              ) : (
+                <span className="text-[10px] text-slate-500 font-mono">
+                  * Only Regional TOC Manager can remove alerts
+                </span>
+              )}
+            </>
           ) : (
             <>
-              {/* NON-DRONE THREATS: Standard ground squad / sapper workflow */}
+              {/* NON-DRONE THREATS: A team with an EOD specialist can handle them */}
               {threat.engagement_status === 'unassigned' && (
                 <button
                   onClick={handleTakeResponsibility}
-                  disabled={isLoading || !canEngageThisThreat}
+                  disabled={isLoading || !hasEODSpecialist}
                   className={`px-4 py-2 rounded font-mono text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer ${
-                    canEngageThisThreat
+                    hasEODSpecialist
                       ? 'bg-amber-600 hover:bg-amber-500 text-black shadow-lg shadow-amber-900/40'
                       : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
                   }`}
                   title={
-                    !canEngageThisThreat
-                      ? 'RBAC: Only SapperSquad can engage explosive threats'
+                    !hasEODSpecialist
+                      ? 'Only a team with an EOD specialist (Sapper) can handle this threat'
                       : ''
                   }
                 >
                   <Shield className="w-3.5 h-3.5" />
                   <span>
-                    {threat.threat_type === 'explosive' && !canEngageExplosive
-                      ? 'SAPPER SQUAD ONLY'
+                    {!hasEODSpecialist
+                      ? 'REQUIRES EOD SPECIALIST'
                       : 'TAKE RESPONSIBILITY'}
                   </span>
                 </button>
@@ -306,22 +386,33 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
               {threat.engagement_status === 'in_progress' && (
                 <button
                   onClick={handleResolve}
-                  disabled={isLoading}
-                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs font-semibold flex items-center space-x-1.5 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer"
+                  disabled={isLoading || !hasEODSpecialist}
+                  className={`px-4 py-2 rounded text-white font-mono text-xs font-semibold flex items-center space-x-1.5 shadow-lg transition-all cursor-pointer ${
+                    hasEODSpecialist
+                      ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-900/40'
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  }`}
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                   <span>MARK RESOLVED / NEUTRALIZED</span>
                 </button>
               )}
 
-              <button
-                onClick={handleArchive}
-                disabled={isLoading}
-                className="px-3.5 py-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs flex items-center space-x-1.5 border border-slate-700 transition-colors cursor-pointer"
-              >
-                <Archive className="w-3.5 h-3.5" />
-                <span>ARCHIVE (DEACTIVATE)</span>
-              </button>
+              {/* Only Regional TOC Manager can remove items */}
+              {isRegionalTOC ? (
+                <button
+                  onClick={handleArchive}
+                  disabled={isLoading}
+                  className="px-3.5 py-2 rounded bg-red-950/80 hover:bg-red-900 border border-red-700 text-red-200 font-mono text-xs flex items-center space-x-1.5 transition-colors cursor-pointer"
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                  <span>REMOVE / ARCHIVE THREAT</span>
+                </button>
+              ) : (
+                <span className="text-[10px] text-slate-500 font-mono">
+                  * Only Regional TOC Manager can remove alerts
+                </span>
+              )}
             </>
           )}
         </div>

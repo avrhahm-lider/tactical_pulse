@@ -86,6 +86,12 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
       return
     }
 
+    if (user?.role !== 'Radar' && (type === 'movable' || threatType === 'drone' || threatType === 'vehicle')) {
+      setErrorMessage('Permission Denied: Only Radar stations can add drones or moving objects. Other units may only register stationary objects.')
+      setIsLoading(false)
+      return
+    }
+
     try {
       const newThreat = await api.threats.create({
         name,
@@ -244,15 +250,30 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
                 }}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white font-mono text-xs focus:border-red-500 focus:outline-none"
               >
-                <option value="explosive">Explosive / IED (Sapper only)</option>
-                <option value="vehicle">Hostile Vehicle</option>
-                <option value="drone">Hostile UAV / Drone (Radar only)</option>
-                <option value="personnel">Hostile Personnel</option>
+                <option value="explosive">Explosive / IED (Stationary)</option>
+                {user?.role === 'Radar' ? (
+                  <>
+                    <option value="drone">Hostile UAV / Drone (Radar Auth)</option>
+                    <option value="vehicle">Hostile Vehicle (Radar Auth)</option>
+                    <option value="personnel">Hostile Personnel (Movable)</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="drone" disabled>Hostile UAV / Drone (Radar Only)</option>
+                    <option value="vehicle" disabled>Hostile Vehicle (Radar Only)</option>
+                    <option value="personnel" disabled>Hostile Personnel (Radar Only)</option>
+                  </>
+                )}
               </select>
+              {user?.role !== 'Radar' && (
+                <p className="text-[10px] text-amber-400/90 font-mono mt-1">
+                  * Only Radar stations can add aerial drones or moving objects.
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Severity & Danger Radius */}
+          {/* Severity & Danger Radius (Admin Defined Threat Zone) */}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label htmlFor="threat-mobility" className="block text-[11px] font-mono text-slate-300 mb-1">
@@ -262,11 +283,14 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
                 id="threat-mobility"
                 name="type"
                 value={type}
+                disabled={user?.role !== 'Radar'}
                 onChange={(e) => setType(e.target.value as ThreatType)}
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white font-mono text-xs focus:border-red-500 focus:outline-none"
+                className={`w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded font-mono text-xs focus:border-red-500 focus:outline-none ${
+                  user?.role !== 'Radar' ? 'text-slate-400 cursor-not-allowed' : 'text-white'
+                }`}
               >
-                <option value="immovable">Immovable</option>
-                <option value="movable">Movable</option>
+                <option value="immovable">Immovable (Stationary)</option>
+                {user?.role === 'Radar' && <option value="movable">Movable (Moving)</option>}
               </select>
             </div>
 
@@ -290,7 +314,7 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
 
             <div>
               <label htmlFor="threat-radius" className="block text-[11px] font-mono text-slate-300 mb-1">
-                DANGER RADIUS (M)
+                DANGER ZONE (X METERS)
               </label>
               <input
                 id="threat-radius"
@@ -302,6 +326,22 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
                 onChange={(e) => setRadius(Number(e.target.value))}
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white font-mono text-xs focus:border-red-500 focus:outline-none"
               />
+              <div className="flex gap-1 mt-1">
+                {[100, 150, 300, 500].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setRadius(preset)}
+                    className={`text-[9px] px-1 py-0.5 rounded border ${
+                      radius === preset
+                        ? 'bg-red-950 border-red-500 text-red-200'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {preset}m
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

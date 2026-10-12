@@ -12,6 +12,7 @@ import {
   Users,
   Shield,
 } from 'lucide-react'
+import { DroneIcon } from '../Common/DroneIcon'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { api } from '../../services/api'
@@ -325,7 +326,11 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <Flame className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+                    {th.threat_type === 'drone' || th.name.toLowerCase().includes('drone') ? (
+                      <DroneIcon size={15} className="text-red-400 animate-pulse" />
+                    ) : (
+                      <Flame className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+                    )}
                     <span className="font-bold text-white">{th.name}</span>
                   </div>
                   <span

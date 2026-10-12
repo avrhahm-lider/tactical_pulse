@@ -4,6 +4,7 @@ import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import type { Squad, Threat, User } from '../../types'
 import { Crosshair, Maximize2 } from 'lucide-react'
+import { getDroneSvgString } from '../Common/DroneIcon'
 
 // Leaflet default icon fix
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl
@@ -217,6 +218,7 @@ export const TacticalMap: React.FC = () => {
   const zonesLayerRef = useRef<L.LayerGroup | null>(null)
   const pinMarkerRef = useRef<L.Marker | null>(null)
   const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
+  const svgRendererRef = useRef<L.SVG | null>(null)
 
   // Auto-fit mode toggle & programmatic movement guard
   const [isAutoFitMode, setIsAutoFitMode] = useState<boolean>(false)
@@ -299,11 +301,14 @@ export const TacticalMap: React.FC = () => {
     threatsLayerRef.current = L.layerGroup().addTo(map)
     markersLayerRef.current = L.layerGroup().addTo(map)
 
+    svgRendererRef.current = L.svg()
+
     mapInstanceRef.current = map
 
     return () => {
       map.remove()
       mapInstanceRef.current = null
+      svgRendererRef.current = null
       squadMarkersRef.current.clear()
     }
   }, [])
@@ -514,61 +519,52 @@ export const TacticalMap: React.FC = () => {
     const isManager = user?.role === 'MainCommandCenter'
     const authorizedArea = user?.area as 'North' | 'Center' | 'South' | 'Global'
 
-    // 1. Draw Dividing Lines
-    // North boundary at 32.7000
-    L.polyline(
-      [
-        [32.7, 33.8],
-        [32.7, 36.2],
-      ],
-      { color: '#00e5ff', weight: 2, dashArray: '6, 6', opacity: 0.8 }
-    )
-      .bindTooltip('NORTHERN SECTOR BOUNDARY (Lat 32.70)', {
-        permanent: true,
-        direction: 'top',
-        className: 'tactical-tooltip',
+    const isFieldTeam = user?.role === 'Squad' || user?.role === 'SapperSquad'
+
+    // Operational sectors are only drawn for command centers. Field teams see only their immediate range.
+    if (!isFieldTeam) {
+      // 1. Draw Dividing Lines (Boundary text labels removed)
+      L.polyline(
+        [
+          [32.7, 33.8],
+          [32.7, 36.2],
+        ],
+        { color: '#00e5ff', weight: 1.5, dashArray: '6, 6', opacity: 0.6 }
+      ).addTo(zonesLayer)
+
+      L.polyline(
+        [
+          [31.9, 33.8],
+          [31.9, 36.2],
+        ],
+        { color: '#f59e0b', weight: 1.5, dashArray: '6, 6', opacity: 0.6 }
+      ).addTo(zonesLayer)
+
+      // 2. Render Sector Boundary Polygons for command centers
+      ;(Object.keys(SECTOR_DEFS) as Array<'North' | 'Center' | 'South'>).forEach((secKey) => {
+        const sec = SECTOR_DEFS[secKey]
+        const polygonCoords: [number, number][] = [
+          [sec.minLat, sec.minLon],
+          [sec.maxLat, sec.minLon],
+          [sec.maxLat, sec.maxLon],
+          [sec.minLat, sec.maxLon],
+        ]
+
+        const isFocused = isManager && selectedZoneFilter === secKey
+        const isAuthorized = isManager || authorizedArea === secKey
+
+        const poly = L.polygon(polygonCoords, {
+          color: isAuthorized ? sec.color : '#334155',
+          weight: isFocused ? 3 : isAuthorized ? 2 : 1.2,
+          fillColor: isAuthorized ? sec.color : '#000000',
+          fillOpacity: isFocused ? 0.16 : isAuthorized ? 0.08 : 0.28,
+          dashArray: isAuthorized ? undefined : '5, 5',
+          interactive: false,
+        })
+
+        poly.addTo(zonesLayer)
       })
-      .addTo(zonesLayer)
-
-    // Center/South boundary at 31.9000
-    L.polyline(
-      [
-        [31.9, 33.8],
-        [31.9, 36.2],
-      ],
-      { color: '#f59e0b', weight: 2, dashArray: '6, 6', opacity: 0.8 }
-    )
-      .bindTooltip('SOUTHERN SECTOR BOUNDARY (Lat 31.90)', {
-        permanent: true,
-        direction: 'bottom',
-        className: 'tactical-tooltip-amber',
-      })
-      .addTo(zonesLayer)
-
-    // 2. Render Sector Boundary Polygons
-    ;(Object.keys(SECTOR_DEFS) as Array<'North' | 'Center' | 'South'>).forEach((secKey) => {
-      const sec = SECTOR_DEFS[secKey]
-      const polygonCoords: [number, number][] = [
-        [sec.minLat, sec.minLon],
-        [sec.maxLat, sec.minLon],
-        [sec.maxLat, sec.maxLon],
-        [sec.minLat, sec.maxLon],
-      ]
-
-      const isFocused = isManager && selectedZoneFilter === secKey
-      const isAuthorized = isManager || authorizedArea === secKey
-
-      const poly = L.polygon(polygonCoords, {
-        color: isAuthorized ? sec.color : '#334155',
-        weight: isFocused ? 3 : isAuthorized ? 2 : 1.2,
-        fillColor: isAuthorized ? sec.color : '#000000',
-        fillOpacity: isFocused ? 0.16 : isAuthorized ? 0.08 : 0.28,
-        dashArray: isAuthorized ? undefined : '5, 5',
-        interactive: false,
-      })
-
-      poly.addTo(zonesLayer)
-    })
+    }
 
     if (
       user?.id &&
@@ -778,15 +774,23 @@ export const TacticalMap: React.FC = () => {
 
       const isUnderIntrusion = dangerZoneAlerts.some((a) => a.threat_id === threat.id)
       const radius = threat.radius || 150
+      const isDrone = threat.threat_type === 'drone' || threat.name.toLowerCase().includes('drone')
+      const isRedZone = isUnderIntrusion || threat.engagement_status === 'unassigned' || threatColor === '#ef4444'
 
-      // Draw danger buffer circle (default 150m)
+      // Draw danger buffer circle (default 150m) with pulse animation for red zone
       L.circle([threat.lat, threat.lon], {
         radius,
+        renderer: svgRendererRef.current || undefined,
         color: isUnderIntrusion ? '#ff0033' : threatColor,
         fillColor: isUnderIntrusion ? '#ff0033' : threatColor,
-        fillOpacity: isUnderIntrusion ? 0.38 : (threat.engagement_status === 'resolved' ? 0.08 : 0.22),
-        weight: isUnderIntrusion ? 3 : 1.5,
-        dashArray: isUnderIntrusion ? '4, 4' : (threat.engagement_status === 'in_progress' ? '5, 5' : undefined),
+        fillOpacity: isUnderIntrusion ? 0.42 : threat.engagement_status === 'resolved' ? 0.08 : 0.25,
+        weight: isUnderIntrusion ? 3.5 : isRedZone ? 2.5 : 1.5,
+        dashArray: isUnderIntrusion ? '4, 4' : threat.engagement_status === 'in_progress' ? '5, 5' : undefined,
+        className: isRedZone
+          ? isUnderIntrusion
+            ? 'threat-zone-intrusion-pulse'
+            : 'threat-zone-red-pulse'
+          : '',
       }).addTo(threatsLayer)
 
       // If under active intrusion, draw dashed tactical alert line to the endangered squad
@@ -806,35 +810,89 @@ export const TacticalMap: React.FC = () => {
           })
       }
 
-      // Threat marker icon
+      // Threat marker icon: unified frame with icon and threat name INSIDE the frame, centered on [threat.lat, threat.lon]
       const threatIconHtml = `
-        <div style="position: relative; transform: translate(-50%, -50%); cursor: pointer; text-align: center;">
+        <div style="
+          position: absolute;
+          left: 0;
+          top: 0;
+          transform: translate(-50%, -50%);
+          cursor: pointer;
+          pointer-events: auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          ${
+            isRedZone
+              ? `
+            <div style="
+              position: absolute;
+              left: 50%;
+              top: 50%;
+              transform: translate(-50%, -50%);
+              width: 52px;
+              height: 52px;
+              border-radius: 50%;
+              border: 2px solid ${isUnderIntrusion ? '#ff0033' : '#ef4444'};
+              pointer-events: none;
+              animation: danger-sonar-ring ${isUnderIntrusion ? '0.9s' : '2s'} cubic-bezier(0, 0.2, 0.8, 1) infinite;
+            "></div>
+            <div style="
+              position: absolute;
+              left: 50%;
+              top: 50%;
+              transform: translate(-50%, -50%);
+              width: 52px;
+              height: 52px;
+              border-radius: 50%;
+              border: 1.5px solid ${isUnderIntrusion ? '#ff0033' : '#ef4444'};
+              pointer-events: none;
+              animation: danger-sonar-ring ${isUnderIntrusion ? '0.9s' : '2s'} cubic-bezier(0, 0.2, 0.8, 1) infinite;
+              animation-delay: ${isUnderIntrusion ? '0.45s' : '1s'};
+            "></div>
+          `
+              : ''
+          }
           <div style="
-            width: ${isUnderIntrusion ? '34px' : '28px'};
-            height: ${isUnderIntrusion ? '34px' : '28px'};
-            background: ${isUnderIntrusion ? '#dc2626' : threatColor};
-            border: 2px solid #ffffff;
-            border-radius: 6px;
-            display: flex;
+            position: relative;
+            z-index: 2;
+            display: inline-flex;
             align-items: center;
-            justify-content: center;
-            box-shadow: 0 0 ${isUnderIntrusion ? '20px #ef4444' : '12px ' + threatColor};
-            animation: ${isUnderIntrusion ? 'threat-pulse 0.8s infinite' : (threat.engagement_status === 'unassigned' ? 'threat-pulse 1.8s infinite' : 'none')};
-          ">
-            <span style="color: white; font-weight: 900; font-size: 14px;">!</span>
-          </div>
-          <div style="
-            margin-top: 3px;
-            background: rgba(15, 23, 42, 0.9);
-            color: #ffffff;
-            font-size: 10px;
-            padding: 1px 4px;
-            border-radius: 3px;
-            border: 1px solid ${isUnderIntrusion ? '#ff0033' : threatColor};
+            gap: 7px;
+            padding: 4px 9px 4px 7px;
+            background: rgba(10, 15, 29, 0.96);
+            border: 2px solid ${isUnderIntrusion ? '#ff0033' : threatColor};
+            border-radius: 6px;
+            box-shadow: 0 0 ${isUnderIntrusion ? '20px #ef4444' : '10px ' + threatColor}80, 0 4px 12px rgba(0,0,0,0.8);
             white-space: nowrap;
-            font-weight: ${isUnderIntrusion ? 'bold' : 'normal'};
+            font-family: ui-monospace, monospace;
+            animation: ${isUnderIntrusion ? 'threat-pulse 0.8s infinite' : threat.engagement_status === 'unassigned' ? 'threat-pulse 1.8s infinite' : 'none'};
           ">
-            ${isUnderIntrusion ? '🚨 ' : ''}${threat.name}
+            <div style="
+              width: ${isDrone ? '24px' : '20px'};
+              height: ${isDrone ? '24px' : '20px'};
+              background: ${isUnderIntrusion ? '#dc2626' : threatColor};
+              border-radius: ${isDrone ? '50%' : '4px'};
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              flex-shrink: 0;
+            ">
+              ${
+                isDrone
+                  ? getDroneSvgString(16, '#ffffff')
+                  : '<span style="color: white; font-weight: 900; font-size: 13px; line-height: 1;">!</span>'
+              }
+            </div>
+            <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.15;">
+              <span style="font-size: 11px; font-weight: bold; color: #ffffff; letter-spacing: 0.02em;">
+                ${isUnderIntrusion ? '🚨 ' : ''}${threat.name}
+              </span>
+              <span style="font-size: 9px; color: ${isUnderIntrusion ? '#fca5a5' : '#94a3b8'};">
+                ${isDrone ? `UAV DRONE${threat.altitude ? ` • ${threat.altitude}m` : ''}` : threat.threat_type.toUpperCase()} • R: ${radius}m
+              </span>
+            </div>
           </div>
         </div>
       `
@@ -843,6 +901,7 @@ export const TacticalMap: React.FC = () => {
         className: 'threat-marker-container',
         html: threatIconHtml,
         iconSize: [0, 0],
+        iconAnchor: [0, 0],
       })
 
       const marker = L.marker([threat.lat, threat.lon], { icon: threatIcon })
@@ -881,23 +940,25 @@ export const TacticalMap: React.FC = () => {
         </button>
       </div>
 
-      {/* Floating Map Zone View Switcher */}
-      <div className="absolute top-4 right-4 z-[999] hud-panel px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-1.5 font-mono text-xs">
-        <span className="text-slate-400 font-bold mr-1 text-[11px]">ZONE:</span>
-        {(['Global', 'North', 'Center', 'South'] as const).map((zone) => (
-          <button
-            key={zone}
-            onClick={() => handleZoneSelect(zone)}
-            className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all cursor-pointer border ${
-              selectedZoneFilter === zone
-                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 shadow-md shadow-cyan-950/60'
-                : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-slate-800'
-            }`}
-          >
-            {zone.toUpperCase()}
-          </button>
-        ))}
-      </div>
+      {/* Floating Map Zone View Switcher (Only visible to Command Centers) */}
+      {(user?.role === 'MainCommandCenter' || user?.role === 'AreaCommandCenter') && (
+        <div className="absolute top-4 right-4 z-[999] hud-panel px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-1.5 font-mono text-xs">
+          <span className="text-slate-400 font-bold mr-1 text-[11px]">ZONE:</span>
+          {(['Global', 'North', 'Center', 'South'] as const).map((zone) => (
+            <button
+              key={zone}
+              onClick={() => handleZoneSelect(zone)}
+              className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all cursor-pointer border ${
+                selectedZoneFilter === zone
+                  ? 'bg-cyan-950 border-cyan-500 text-cyan-300 shadow-md shadow-cyan-950/60'
+                  : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-slate-800'
+              }`}
+            >
+              {zone.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Pin Drop Notice Bar when user is picking location */}
       {isPickingLocationOnMap && (
