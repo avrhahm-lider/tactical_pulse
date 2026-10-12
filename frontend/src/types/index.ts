@@ -67,6 +67,45 @@ export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical'
 
 export type EngagementStatus = 'unassigned' | 'in_progress' | 'resolved'
 
+export interface UserCreate {
+  username: string
+  password: string
+  role: UserRole
+  name: string
+  description?: string
+  soldier_id?: string | null
+  area?: Area | null
+  lat?: number | null
+  lon?: number | null
+  soldiers?: { id: string; name: string; role: string }[]
+  soldier_ids?: string[]
+}
+
+export interface UserUpdate {
+  name?: string
+  description?: string
+  role?: UserRole
+  area?: Area
+  soldier_id?: string | null
+  password?: string
+  lat?: number | null
+  lon?: number | null
+  soldier_ids?: string[]
+}
+
+export interface ThreatCreate {
+  name: string
+  description?: string
+  threat_type: ThreatCategory
+  type?: ThreatType
+  severity_level: SeverityLevel
+  radius?: number
+  lat: number
+  lon: number
+  altitude?: number | null
+  soldier_id?: string
+}
+
 export interface Threat {
   id: string
   type: ThreatType

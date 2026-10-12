@@ -245,15 +245,24 @@ export const ThreatDetailModal: React.FC<ThreatDetailModalProps> = ({
           )}
 
           {/* Author / Soldier Attribution Display */}
-          {(threat.created_by_soldier_name || threat.created_by_unit_name) && (
+          {(threat.created_by_soldier_name || threat.created_by_soldier_id || threat.created_by_unit_name) && (
             <div className="p-2.5 rounded bg-slate-900/60 border border-slate-800 text-[11px] text-slate-300">
               <span className="text-[10px] text-slate-500 block uppercase font-mono">THREAT ATTRIBUTION</span>
-              <span className="font-mono text-cyan-300 font-semibold">
-                Reported by:{' '}
-                {threat.created_by_soldier_name
-                  ? `${threat.created_by_soldier_name} (ID: ${threat.created_by_soldier_id || 'N/A'}) - ${threat.created_by_unit_name || 'Duty Desk'}`
-                  : threat.created_by_unit_name || 'Authorized Unit'}
-              </span>
+              <div className="font-mono text-cyan-300 font-semibold space-y-0.5 mt-0.5">
+                <div>
+                  <span className="text-slate-400">Reporting Unit: </span>
+                  <span>{threat.created_by_unit_name || 'Field Operational Force'}</span>
+                </div>
+                {(threat.created_by_soldier_name || threat.created_by_soldier_id) && (
+                  <div>
+                    <span className="text-slate-400">Reporting Soldier: </span>
+                    <span>
+                      {threat.created_by_soldier_name ? threat.created_by_soldier_name : 'Soldier'}{' '}
+                      {threat.created_by_soldier_id ? `[ID: ${threat.created_by_soldier_id}]` : ''}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

@@ -38,6 +38,17 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  // Retrieve current user's attached soldier roster
+  const unitSoldiers = user?.soldiers || (user?.id ? squads[user.id]?.soldiers : []) || []
+  const defaultSoldierId = user?.soldier_id || user?.soldier?.id || unitSoldiers[0]?.id || ''
+  const [reportingSoldierId, setReportingSoldierId] = useState<string>(defaultSoldierId)
+
+  useEffect(() => {
+    if (!reportingSoldierId && defaultSoldierId) {
+      setReportingSoldierId(defaultSoldierId)
+    }
+  }, [defaultSoldierId, reportingSoldierId])
+
   // Update coordinates when picked from map
   useEffect(() => {
     if (pickedLocation) {
@@ -103,6 +114,7 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
         lat: parsedLat,
         lon: parsedLon,
         altitude: threatType === 'drone' && altitude ? parseFloat(altitude) : null,
+        soldier_id: reportingSoldierId || undefined,
       })
 
       // Add to local state (Socket also receives it)
@@ -211,6 +223,40 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white font-mono text-xs focus:border-red-500 focus:outline-none"
               />
             </div>
+          </div>
+
+          {/* Reporting Soldier / Operator Selection */}
+          <div className="p-2.5 rounded bg-slate-900/80 border border-slate-700/80 space-y-1">
+            <label htmlFor="reporting-soldier" className="block text-[11px] font-mono text-cyan-300 font-semibold uppercase">
+              REPORTING SOLDIER / OPERATOR
+            </label>
+            {unitSoldiers.length > 0 ? (
+              <select
+                id="reporting-soldier"
+                name="reporting_soldier"
+                value={reportingSoldierId}
+                onChange={(e) => setReportingSoldierId(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded text-white font-mono text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
+              >
+                {unitSoldiers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} [ID: {s.id}] — {s.role.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            ) : user?.soldier_id ? (
+              <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded text-xs font-mono text-cyan-300 flex justify-between items-center">
+                <span>{user.name}</span>
+                <span className="text-slate-400">Military ID: {user.soldier_id}</span>
+              </div>
+            ) : (
+              <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded text-xs font-mono text-slate-400">
+                Operating Unit: {user?.name || 'Tactical Force'}
+              </div>
+            )}
+            <p className="text-[10px] text-slate-400 font-mono">
+              Attaches military operator attribution to this intelligence incident report.
+            </p>
           </div>
 
           {/* Name & Threat Category */}

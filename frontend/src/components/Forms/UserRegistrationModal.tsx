@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   X,
   UserPlus,
@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { api } from '../../services/api'
 import { useMapStore } from '../../store/useMapStore'
-import type { UserRole, Area } from '../../types'
+import type { UserRole, Area, Soldier } from '../../types'
 
 interface SoldierInput {
   id: string
@@ -70,9 +70,32 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   const [commanderSoldierName, setCommanderSoldierName] = useState('Maj. Dan Alon')
   const [commanderSoldierRole, setCommanderSoldierRole] = useState('commander')
 
+  // Unassigned soldiers in military registry
+  const [unassignedSoldiers, setUnassignedSoldiers] = useState<Soldier[]>([])
+  const [selectedUnassignedSoldierIds, setSelectedUnassignedSoldierIds] = useState<string[]>([])
+  const [isLoadingUnassigned, setIsLoadingUnassigned] = useState(false)
+
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  // Fetch unassigned soldiers when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setIsLoadingUnassigned(true)
+      api.admin
+        .getUnassignedSoldiers()
+        .then((list) => {
+          setUnassignedSoldiers(list || [])
+        })
+        .catch((err) => {
+          console.error('Failed to load unassigned soldiers:', err)
+        })
+        .finally(() => {
+          setIsLoadingUnassigned(false)
+        })
+    }
+  }, [isOpen])
 
   // Reactively update username when name/HQ changes
   const handleNameChange = (newName: string) => {
@@ -144,6 +167,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   // Role changes
   const handleRoleChange = (newRole: UserRole) => {
     setRole(newRole)
+    setSelectedUnassignedSoldierIds([])
     if (newRole === 'AreaCommandCenter') {
       handleSelectHQPreset(REGIONAL_HQ_PRESETS[0])
     } else if (newRole === 'Squad') {
@@ -206,6 +230,35 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     setSoldiers(updated)
   }
 
+  const toggleUnassignedSoldier = (sId: string) => {
+    setSelectedUnassignedSoldierIds((prev) =>
+      prev.includes(sId) ? prev.filter((id) => id !== sId) : [...prev, sId]
+    )
+  }
+
+  const isCommandCenterRole = role === 'MainCommandCenter' || role === 'AreaCommandCenter'
+  const isSquadRole = role === 'Squad' || role === 'SapperSquad'
+
+  // Verification if commander details are validly specified
+  const hasValidCommander = Boolean(
+    commanderSoldierId.trim() &&
+    commanderSoldierName.trim() &&
+    /^\d{7}$/.test(commanderSoldierId.trim())
+  )
+
+  // Total soldiers attached to this unit (selected unassigned + added roster + commander)
+  const totalAssignedSoldiers =
+    selectedUnassignedSoldierIds.length +
+    soldiers.length +
+    (isCommandCenterRole && hasValidCommander ? 1 : 0)
+
+  // Strict soldier validation: Command Centers require >= 1 soldier; Squads require >= 2 soldiers
+  const isSoldierRequirementMet = isCommandCenterRole
+    ? totalAssignedSoldiers >= 1
+    : isSquadRole
+    ? totalAssignedSoldiers >= 2
+    : true
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
@@ -222,40 +275,36 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         return
       }
 
-      // 1. Manager / Regional HQ requires assigning a soldier
+      // 1. Manager / Regional HQ requires assigning at least one soldier
       let assignedSoldierId: string | undefined = undefined
-      if (role === 'MainCommandCenter' || role === 'AreaCommandCenter') {
-        if (!commanderSoldierId || !/^\d{7}$/.test(commanderSoldierId)) {
-          setErrorMessage('Assigning a soldier with a valid 7-digit military ID is required for command headquarters.')
-          setIsLoading(false)
-          return
-        }
-        if (!commanderSoldierName.trim()) {
-          setErrorMessage('Officer / soldier name is required.')
+      if (isCommandCenterRole) {
+        if (totalAssignedSoldiers < 1) {
+          setErrorMessage('At least one soldier is required when registering a command center.')
           setIsLoading(false)
           return
         }
 
-        // Ensure soldier is registered in soldiers table first
-        try {
-          await api.admin.createSoldier({
-            id: commanderSoldierId,
-            name: commanderSoldierName.trim(),
-            role: commanderSoldierRole || 'commander',
-          })
-        } catch (soldierErr: unknown) {
-          // If 409 conflict, soldier is already in registry which is fine
-          const axiosErr = soldierErr as { response?: { status?: number } }
-          if (axiosErr.response?.status !== 409) {
-            throw soldierErr
+        // If commander details are provided, register/ensure commander in registry
+        if (hasValidCommander) {
+          try {
+            await api.admin.createSoldier({
+              id: commanderSoldierId.trim(),
+              name: commanderSoldierName.trim(),
+              role: commanderSoldierRole || 'commander',
+            })
+          } catch (soldierErr: unknown) {
+            const axiosErr = soldierErr as { response?: { status?: number } }
+            if (axiosErr.response?.status !== 409) {
+              throw soldierErr
+            }
           }
+          assignedSoldierId = commanderSoldierId.trim()
         }
-        assignedSoldierId = commanderSoldierId
       }
 
       // 2. Creating a team requires adding multiple soldiers (>= 2)
-      if (role === 'Squad' || role === 'SapperSquad') {
-        if (soldiers.length < 2) {
+      if (isSquadRole) {
+        if (totalAssignedSoldiers < 2) {
           setErrorMessage('Creating a tactical team requires adding multiple soldiers (minimum 2 soldiers).')
           setIsLoading(false)
           return
@@ -278,7 +327,8 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         description,
         lat: parsedLat,
         lon: parsedLon,
-        soldiers: soldiers.map((s) => ({ id: s.id, name: s.name, role: s.role })),
+        soldiers: soldiers.length > 0 ? soldiers.map((s) => ({ id: s.id, name: s.name, role: s.role })) : undefined,
+        soldier_ids: selectedUnassignedSoldierIds.length > 0 ? selectedUnassignedSoldierIds : undefined,
       }
 
       if (assignedSoldierId) {
@@ -513,6 +563,66 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
             />
           </div>
 
+          {/* Unassigned Soldier Picker (Available for Command Centers & Field Squads) */}
+          <div className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-700/80 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Users className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-mono font-bold text-white tracking-wider">
+                  ASSIGN UNASSIGNED SOLDIERS ({selectedUnassignedSoldierIds.length} SELECTED)
+                </span>
+              </div>
+              {isLoadingUnassigned ? (
+                <span className="text-[10px] text-slate-400 font-mono animate-pulse">Loading registry...</span>
+              ) : (
+                <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
+                  {unassignedSoldiers.length} Available in Database
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] text-slate-300 font-mono">
+              Select existing unassigned soldiers from the registry to attach to this unit:
+            </p>
+
+            {unassignedSoldiers.length === 0 ? (
+              <div className="p-2.5 rounded bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 font-mono">
+                No unassigned soldiers currently available. You can add new soldiers to the roster below.
+              </div>
+            ) : (
+              <div className="max-h-36 overflow-y-auto space-y-1.5 p-1 bg-slate-950/80 rounded border border-slate-800">
+                {unassignedSoldiers.map((soldier) => {
+                  const isSelected = selectedUnassignedSoldierIds.includes(soldier.id)
+                  return (
+                    <div
+                      key={soldier.id}
+                      onClick={() => toggleUnassignedSoldier(soldier.id)}
+                      className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors border font-mono text-xs ${
+                        isSelected
+                          ? 'bg-cyan-950/90 border-cyan-500 text-cyan-200'
+                          : 'bg-slate-900/50 hover:bg-slate-800 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {}}
+                          className="rounded border-slate-700 text-cyan-500 focus:ring-0 cursor-pointer"
+                        />
+                        <span className="font-bold text-white">{soldier.name}</span>
+                        <span className="text-slate-400 font-mono text-[10px]">[ID: {soldier.id}]</span>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-amber-300 uppercase">
+                        {soldier.role}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Appointed Commanding Officer (Soldier Assignment - Required for HQ / Manager) */}
           {(role === 'MainCommandCenter' || role === 'AreaCommandCenter') && (
             <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-700/80 space-y-3">
@@ -520,15 +630,15 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                 <div className="flex items-center space-x-2">
                   <Shield className="w-4 h-4 text-indigo-400" />
                   <span className="text-xs font-mono font-bold text-white tracking-wider">
-                    APPOINTED COMMANDING OFFICER (SOLDIER ASSIGNMENT - REQUIRED)
+                    APPOINTED COMMANDING OFFICER (SOLDIER ASSIGNMENT - OPTIONAL IF SOLDIERS ASSIGNED)
                   </span>
                 </div>
                 <span className="text-[10px] text-indigo-300 font-mono font-semibold px-2 py-0.5 rounded bg-indigo-900/60 border border-indigo-600">
-                  MANDATORY
+                  {selectedUnassignedSoldierIds.length > 0 || soldiers.length > 0 ? 'OPTIONAL' : 'MANDATORY'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-300 font-mono">
-                Command headquarters must be commanded by an appointed soldier with a verified 7-digit military ID.
+                Command headquarters must be commanded by an appointed officer with a verified 7-digit military ID.
               </p>
               <div className="grid grid-cols-12 gap-3">
                 <div className="col-span-4">
@@ -537,7 +647,6 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    required
                     value={commanderSoldierId}
                     onChange={(e) => setCommanderSoldierId(e.target.value)}
                     placeholder="7-digit ID"
@@ -551,7 +660,6 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    required
                     value={commanderSoldierName}
                     onChange={(e) => setCommanderSoldierName(e.target.value)}
                     placeholder="e.g. Maj. Dan Alon"
@@ -578,27 +686,31 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
             </div>
           )}
 
-          {/* Soldier Roster Builder for Field Combat Squads */}
-          {(role === 'Squad' || role === 'SapperSquad') && (
-            <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Users className="w-4 h-4 text-cyan-400" />
-                  <span className="text-xs font-mono font-bold text-white tracking-wider">
-                    ATTACHED SOLDIER ROSTER ({soldiers.length})
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddSoldier}
-                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 text-[11px] font-mono flex items-center gap-1 cursor-pointer"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>ADD SOLDIER</span>
-                </button>
+          {/* Soldier Roster Builder (Available for both Command Centers & Field Combat Squads) */}
+          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Users className="w-4 h-4 text-cyan-400" />
+                <span className="text-xs font-mono font-bold text-white tracking-wider">
+                  NEW SOLDIER ROSTER ({soldiers.length})
+                </span>
               </div>
+              <button
+                type="button"
+                onClick={handleAddSoldier}
+                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 text-[11px] font-mono flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                <span>ADD SOLDIER</span>
+              </button>
+            </div>
 
-              {soldiers.map((s, idx) => (
+            {soldiers.length === 0 ? (
+              <p className="text-[11px] text-slate-400 font-mono">
+                Click "+ ADD SOLDIER" to register new soldiers directly into this unit's roster.
+              </p>
+            ) : (
+              soldiers.map((s, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-center">
                   <div className="col-span-3">
                     <input
@@ -643,26 +755,42 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                     </button>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
 
           {/* Submit Buttons */}
-          <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800 shrink-0">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold tracking-wider shadow-lg shadow-cyan-900/40 border border-cyan-400/50 cursor-pointer disabled:opacity-50"
-            >
-              {isLoading ? 'REGISTERING...' : 'REGISTER FORCE'}
-            </button>
+          <div className="flex items-center justify-between pt-3 border-t border-slate-800 shrink-0">
+            <div>
+              {!isSoldierRequirementMet && (
+                <span className="text-[11px] text-amber-400 font-mono">
+                  ⚠️ {isCommandCenterRole ? 'Attach at least 1 soldier for Command Center' : 'Attach at least 2 soldiers for Tactical Squad'}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isLoading || !isSoldierRequirementMet}
+                title={
+                  !isSoldierRequirementMet
+                    ? isCommandCenterRole
+                      ? 'At least one soldier is required when registering a Command Center'
+                      : 'At least 2 soldiers are required when registering a Tactical Squad'
+                    : 'Register Force'
+                }
+                className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold tracking-wider shadow-lg shadow-cyan-900/40 border border-cyan-400/50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'REGISTERING...' : 'REGISTER FORCE'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

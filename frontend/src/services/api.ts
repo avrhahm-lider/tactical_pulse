@@ -1,6 +1,15 @@
 import axios from 'axios'
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
-import type { AuthResponse, MapSnapshot, Threat, User, ApiError } from '../types'
+import type {
+  AuthResponse,
+  MapSnapshot,
+  Threat,
+  User,
+  ApiError,
+  Soldier,
+  UserCreate,
+  ThreatCreate,
+} from '../types'
 
 export const API_BASE_URL = 'http://localhost:8000/api/v1'
 
@@ -103,7 +112,7 @@ export const api = {
   },
 
   threats: {
-    create: async (payload: Partial<Threat>): Promise<Threat> => {
+    create: async (payload: ThreatCreate | Partial<Threat>): Promise<Threat> => {
       const res = await apiClient.post<Threat>('/threats', payload)
       return res.data
     },
@@ -118,7 +127,7 @@ export const api = {
       const res = await apiClient.get<User[]>('/admin/users')
       return res.data
     },
-    createUser: async (payload: unknown): Promise<User> => {
+    createUser: async (payload: UserCreate | unknown): Promise<User> => {
       const res = await apiClient.post<User>('/admin/users', payload)
       return res.data
     },
@@ -134,16 +143,20 @@ export const api = {
       const res = await apiClient.post<{ message: string }>(`/admin/users/${userId}/reset-session`)
       return res.data
     },
-    getSoldiers: async (params?: { squad_id?: string; has_user?: boolean }): Promise<any[]> => {
-      const res = await apiClient.get('/admin/soldiers', { params })
+    getSoldiers: async (params?: { squad_id?: string; has_user?: boolean }): Promise<Soldier[]> => {
+      const res = await apiClient.get<Soldier[]>('/admin/soldiers', { params })
       return res.data
     },
-    createSoldier: async (payload: { id: string; name: string; role: string; squad_id?: string | null }): Promise<any> => {
-      const res = await apiClient.post('/admin/soldiers', payload)
+    getUnassignedSoldiers: async (): Promise<Soldier[]> => {
+      const res = await apiClient.get<Soldier[]>('/admin/soldiers/unassigned')
       return res.data
     },
-    updateSoldier: async (soldierId: string, payload: Partial<{ name: string; role: string; squad_id: string | null }>): Promise<any> => {
-      const res = await apiClient.patch(`/admin/soldiers/${soldierId}`, payload)
+    createSoldier: async (payload: { id: string; name: string; role: string; squad_id?: string | null }): Promise<Soldier> => {
+      const res = await apiClient.post<Soldier>('/admin/soldiers', payload)
+      return res.data
+    },
+    updateSoldier: async (soldierId: string, payload: Partial<{ name: string; role: string; squad_id: string | null }>): Promise<Soldier> => {
+      const res = await apiClient.patch<Soldier>(`/admin/soldiers/${soldierId}`, payload)
       return res.data
     },
     deleteSoldier: async (soldierId: string): Promise<any> => {

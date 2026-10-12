@@ -279,6 +279,17 @@ function buildThreatPopupHtml(
           </span>
         </div>
         ${
+          threat.created_by_unit_name || threat.created_by_soldier_name || threat.created_by_soldier_id
+            ? `
+        <div class="prop-row">
+          <span class="prop-label">REPORTED BY:</span>
+          <span class="prop-val" style="color: #38bdf8; font-size: 10px;">
+            ${threat.created_by_soldier_name ? `${threat.created_by_soldier_name} ` : ''}${threat.created_by_soldier_id ? `[${threat.created_by_soldier_id}] ` : ''}${threat.created_by_unit_name ? `(${threat.created_by_unit_name})` : ''}
+          </span>
+        </div>`
+            : ''
+        }
+        ${
           isUnderIntrusion
             ? `
         <div class="prop-row" style="color: #ff0033; font-weight: bold; font-size: 9px; margin-top: 2px;">
