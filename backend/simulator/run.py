@@ -218,7 +218,7 @@ async def simulate_single_unit(username: str, password: str, steps: int = 0, del
 # ==============================================================================
 # RADAR DRONE SIMULATOR (3 Drones Managed by Radar Post)
 # ==============================================================================
-async def simulate_radar_drones(radar_username: str = "radar_post_1", radar_password: str = "radar123", steps: int = 0, delay: float = 1.2, step_meters: float = 35.0):
+async def simulate_radar_drones(radar_username: str = "radar_post_1", radar_password: str = "radar123", steps: int = 0, delay: float = 0.5, step_meters: float = 75.0):
     is_infinite = steps <= 0
     print(f"\n[RADAR] Authenticating radar station '{radar_username}' for drone air surveillance...")
 

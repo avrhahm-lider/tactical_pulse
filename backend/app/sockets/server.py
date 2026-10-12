@@ -164,8 +164,16 @@ async def location_update(sid: str, data: dict):
     if not client:
         return
 
-    # Only field combat squads can emit location updates
-    if client["role"] not in ["Squad", "SapperSquad"]:
+    # Combat squads move themselves; Admin / Command Center can move any squad via squad_id
+    target_id = client["user_id"]
+    if client["role"] in ["MainCommandCenter", "AreaCommandCenter"]:
+        raw_target = data.get("squad_id") or data.get("id")
+        if raw_target:
+            try:
+                target_id = UUID(str(raw_target))
+            except Exception:
+                return
+    elif client["role"] not in ["Squad", "SapperSquad"]:
         return
 
     lat = data.get("lat")
@@ -179,16 +187,24 @@ async def location_update(sid: str, data: dict):
     if not (settings.LAT_MIN <= lat <= settings.LAT_MAX and settings.LON_MIN <= lon <= settings.LON_MAX):
         return
 
-    client["lat"] = lat
-    client["lon"] = lon
     new_area = calculate_area_from_lat(lat)
     now = datetime.now(timezone.utc)
-    old_area = client.get("area")
-    client["area"] = new_area
 
-    # 2. Broadcast squad_moved payload with zero DB latency
+    if target_id == client["user_id"]:
+        client["lat"] = lat
+        client["lon"] = lon
+        old_area = client.get("area")
+        client["area"] = new_area
+        if old_area and old_area != new_area:
+            try:
+                await sio.leave_room(sid, f"zone_{old_area}")
+                await sio.enter_room(sid, f"zone_{new_area}")
+            except Exception:
+                pass
+
+    # Broadcast squad_moved payload with zero DB latency
     squad_moved_payload = {
-        "id": str(client["user_id"]),
+        "id": str(target_id),
         "lat": lat,
         "lon": lon,
         "heading": heading,
@@ -203,21 +219,14 @@ async def location_update(sid: str, data: dict):
         payload=squad_moved_payload,
     )
 
-    # 3. Immediately evaluate danger zone perimeter breach
-    await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
+    # Immediately evaluate danger zone perimeter breach
+    if target_id == client["user_id"]:
+        await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
 
-    # 4. Handle zone room migration if border crossed
-    if old_area and old_area != new_area:
-        try:
-            await sio.leave_room(sid, f"zone_{old_area}")
-            await sio.enter_room(sid, f"zone_{new_area}")
-        except Exception:
-            pass
-
-    # 5. Persist to Postgres safely without blocking real-time WebSocket telemetry
+    # Persist to Postgres safely without blocking real-time WebSocket telemetry
     try:
         async with async_session_maker() as session:
-            map_stmt = select(MapEntity).where(MapEntity.id == client["user_id"])
+            map_stmt = select(MapEntity).where(MapEntity.id == target_id)
             map_res = await session.execute(map_stmt)
             map_ent = map_res.scalar_one_or_none()
 
@@ -227,7 +236,7 @@ async def location_update(sid: str, data: dict):
                 map_ent.updated_at = now
             else:
                 map_ent = MapEntity(
-                    id=client["user_id"],
+                    id=target_id,
                     geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
                     heading=heading,
                     status="active",
@@ -235,17 +244,68 @@ async def location_update(sid: str, data: dict):
                 )
                 session.add(map_ent)
 
-            if old_area and old_area != new_area:
-                user_stmt = select(User).where(User.id == client["user_id"])
-                user_res = await session.execute(user_stmt)
-                user_obj = user_res.scalar_one_or_none()
-                if user_obj:
-                    user_obj.area = new_area
+            user_stmt = select(User).where(User.id == target_id)
+            user_res = await session.execute(user_stmt)
+            user_obj = user_res.scalar_one_or_none()
+            if user_obj and user_obj.area != new_area:
+                user_obj.area = new_area
 
             await _ensure_threats_cache_loaded(session)
             await session.commit()
     except Exception as e:
-        print(f"[SOCKET DB ERROR] Error updating location in db: {e}")
+        print(f"[SOCKET DB ERROR] Error updating squad location in db: {e}")
+
+
+@sio.event
+async def drone_location_update(sid: str, data: dict):
+    """
+    Real-time high-speed aerial telemetry update for drones.
+    Allowed for Radar posts and Main/Area Command Centers.
+    """
+    client = _connected_clients.get(sid)
+    if not client:
+        return
+
+    if client["role"] not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
+        return
+
+    raw_threat_id = data.get("threat_id") or data.get("id")
+    if not raw_threat_id:
+        return
+
+    lat = data.get("lat")
+    lon = data.get("lon")
+    altitude = data.get("altitude")
+
+    if lat is None or lon is None:
+        return
+
+    if not (settings.LAT_MIN <= lat <= settings.LAT_MAX and settings.LON_MIN <= lon <= settings.LON_MAX):
+        return
+
+    threat_id_str = str(raw_threat_id)
+    now = datetime.now(timezone.utc)
+
+    try:
+        async with async_session_maker() as session:
+            stmt = select(Threat).where(Threat.id == UUID(threat_id_str))
+            res = await session.execute(stmt)
+            threat = res.scalar_one_or_none()
+            if not threat or threat.status != "active" or threat.threat_type != "drone":
+                return
+
+            threat.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+            if altitude is not None:
+                threat.altitude = float(altitude)
+            threat.updated_at = now
+            await session.commit()
+            await session.refresh(threat)
+
+            from app.schemas.threat import ThreatResponse
+            resp = ThreatResponse.from_threat(threat, lat, lon)
+            await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+    except Exception as e:
+        print(f"[SOCKET DB ERROR] Error updating drone location in db: {e}")
 
 
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
