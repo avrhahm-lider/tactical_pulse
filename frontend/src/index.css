@@ -368,7 +368,8 @@ body {
   padding-top: 4px;
 }
 
-.squad-marker-container {
+.squad-marker-container,
+.threat-marker-container {
   background: transparent !important;
   border: none !important;
   cursor: pointer !important;

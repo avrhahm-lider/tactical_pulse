@@ -66,6 +66,9 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   const [lon, setLon] = useState('35.3000')
   const [description, setDescription] = useState('Regional HQ Northern Sector')
   const [soldiers, setSoldiers] = useState<SoldierInput[]>([])
+  const [commanderSoldierId, setCommanderSoldierId] = useState('2000002')
+  const [commanderSoldierName, setCommanderSoldierName] = useState('Maj. Dan Alon')
+  const [commanderSoldierRole, setCommanderSoldierRole] = useState('commander')
 
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -82,16 +85,22 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         setArea('North')
         setLat('33.0000')
         setLon('35.3000')
+        setCommanderSoldierId('2000002')
+        setCommanderSoldierName('Maj. Dan Alon')
       } else if (lower.includes('center') || lower.includes('central') || lower.includes('מרכז')) {
         setUsername('command_center')
         setArea('Center')
         setLat('32.1000')
         setLon('34.8000')
+        setCommanderSoldierId('2000003')
+        setCommanderSoldierName('Col. Ronen Bar')
       } else if (lower.includes('south') || lower.includes('דרום')) {
         setUsername('command_south')
         setArea('South')
         setLat('31.2000')
         setLon('34.7000')
+        setCommanderSoldierId('2000004')
+        setCommanderSoldierName('Lt. Col. Avi Cohen')
       } else {
         const slug = newName
           .toLowerCase()
@@ -120,6 +129,16 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     setLat(preset.lat)
     setLon(preset.lon)
     setDescription(preset.description)
+    if (preset.area === 'North') {
+      setCommanderSoldierId('2000002')
+      setCommanderSoldierName('Maj. Dan Alon')
+    } else if (preset.area === 'Center') {
+      setCommanderSoldierId('2000003')
+      setCommanderSoldierName('Col. Ronen Bar')
+    } else if (preset.area === 'South') {
+      setCommanderSoldierId('2000004')
+      setCommanderSoldierName('Lt. Col. Avi Cohen')
+    }
   }
 
   // Role changes
@@ -166,6 +185,9 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       setLon('34.7920')
       setDescription('Supreme Tactical Operations Headquarters')
       setSoldiers([])
+      setCommanderSoldierId('1000002')
+      setCommanderSoldierName('Brig. Gen. Yair Golan')
+      setCommanderSoldierRole('commander')
     }
   }
 
@@ -200,10 +222,41 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         return
       }
 
-      // Validate soldiers for combat squads
+      // 1. Manager / Regional HQ requires assigning a soldier
+      let assignedSoldierId: string | undefined = undefined
+      if (role === 'MainCommandCenter' || role === 'AreaCommandCenter') {
+        if (!commanderSoldierId || !/^\d{7}$/.test(commanderSoldierId)) {
+          setErrorMessage('Assigning a soldier with a valid 7-digit military ID is required for command headquarters.')
+          setIsLoading(false)
+          return
+        }
+        if (!commanderSoldierName.trim()) {
+          setErrorMessage('Officer / soldier name is required.')
+          setIsLoading(false)
+          return
+        }
+
+        // Ensure soldier is registered in soldiers table first
+        try {
+          await api.admin.createSoldier({
+            id: commanderSoldierId,
+            name: commanderSoldierName.trim(),
+            role: commanderSoldierRole || 'commander',
+          })
+        } catch (soldierErr: unknown) {
+          // If 409 conflict, soldier is already in registry which is fine
+          const axiosErr = soldierErr as { response?: { status?: number } }
+          if (axiosErr.response?.status !== 409) {
+            throw soldierErr
+          }
+        }
+        assignedSoldierId = commanderSoldierId
+      }
+
+      // 2. Creating a team requires adding multiple soldiers (>= 2)
       if (role === 'Squad' || role === 'SapperSquad') {
-        if (soldiers.length === 0) {
-          setErrorMessage('Combat squads require at least one soldier in roster.')
+        if (soldiers.length < 2) {
+          setErrorMessage('Creating a tactical team requires adding multiple soldiers (minimum 2 soldiers).')
           setIsLoading(false)
           return
         }
@@ -216,7 +269,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         }
       }
 
-      const payload = {
+      const payload: Record<string, unknown> = {
         username,
         password,
         role,
@@ -226,6 +279,10 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         lat: parsedLat,
         lon: parsedLon,
         soldiers: soldiers.map((s) => ({ id: s.id, name: s.name, role: s.role })),
+      }
+
+      if (assignedSoldierId) {
+        payload.soldier_id = assignedSoldierId
       }
 
       await api.admin.createUser(payload)
@@ -455,6 +512,71 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
               className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
             />
           </div>
+
+          {/* Appointed Commanding Officer (Soldier Assignment - Required for HQ / Manager) */}
+          {(role === 'MainCommandCenter' || role === 'AreaCommandCenter') && (
+            <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-700/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Shield className="w-4 h-4 text-indigo-400" />
+                  <span className="text-xs font-mono font-bold text-white tracking-wider">
+                    APPOINTED COMMANDING OFFICER (SOLDIER ASSIGNMENT - REQUIRED)
+                  </span>
+                </div>
+                <span className="text-[10px] text-indigo-300 font-mono font-semibold px-2 py-0.5 rounded bg-indigo-900/60 border border-indigo-600">
+                  MANDATORY
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 font-mono">
+                Command headquarters must be commanded by an appointed soldier with a verified 7-digit military ID.
+              </p>
+              <div className="grid grid-cols-12 gap-3">
+                <div className="col-span-4">
+                  <label className="block text-[10px] font-mono text-indigo-300 mb-1 uppercase">
+                    Soldier Military ID (7 Digits)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={commanderSoldierId}
+                    onChange={(e) => setCommanderSoldierId(e.target.value)}
+                    placeholder="7-digit ID"
+                    maxLength={7}
+                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-indigo-800 rounded text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+                <div className="col-span-5">
+                  <label className="block text-[10px] font-mono text-indigo-300 mb-1 uppercase">
+                    Officer Full Name &amp; Rank
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={commanderSoldierName}
+                    onChange={(e) => setCommanderSoldierName(e.target.value)}
+                    placeholder="e.g. Maj. Dan Alon"
+                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-indigo-800 rounded text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+                  />
+                </div>
+                <div className="col-span-3">
+                  <label className="block text-[10px] font-mono text-indigo-300 mb-1 uppercase">
+                    Designation Role
+                  </label>
+                  <select
+                    value={commanderSoldierRole}
+                    onChange={(e) => setCommanderSoldierRole(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-indigo-800 rounded text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-400 cursor-pointer"
+                  >
+                    <option value="commander">Commander</option>
+                    <option value="rifleman">Rifleman</option>
+                    <option value="sapper">Sapper</option>
+                    <option value="medic">Medic</option>
+                    <option value="recon">Recon</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Soldier Roster Builder for Field Combat Squads */}
           {(role === 'Squad' || role === 'SapperSquad') && (

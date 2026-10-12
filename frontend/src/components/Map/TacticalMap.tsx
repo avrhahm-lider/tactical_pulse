@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import L from 'leaflet'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
+import { api } from '../../services/api'
 import type { Squad, Threat, User } from '../../types'
 import { Crosshair, Maximize2 } from 'lucide-react'
-import { getDroneSvgString } from '../Common/DroneIcon'
+import { getDroneSvgString, getOtherThreatSvgString } from '../Common/DroneIcon'
 
 // Leaflet default icon fix
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl
@@ -161,6 +162,139 @@ function buildForcePopupHtml(squad: Squad, isStaleSignal: boolean): string {
   `
 }
 
+// Build tactical pop-up panel HTML for threats (similar to team view, with relevant action buttons)
+function buildThreatPopupHtml(
+  threat: Threat,
+  squads: Record<string, Squad>,
+  user: User | null,
+  isUnderIntrusion: boolean
+): string {
+  const isDrone = threat.threat_type === 'drone' || threat.name.toLowerCase().includes('drone')
+  const assignedSquad = threat.assigned_to_id ? squads[threat.assigned_to_id] : null
+  const radius = threat.radius || 150
+
+  const isCommandCenter = user?.role === 'MainCommandCenter' || user?.role === 'AreaCommandCenter'
+  const isSapper = user?.role === 'SapperSquad'
+  const hasEODSpecialist =
+    isSapper ||
+    Boolean(user?.soldiers?.some((s) => s.role === 'sapper')) ||
+    Boolean(user?.soldier?.role === 'sapper') ||
+    isCommandCenter
+
+  let statusLabel = 'UNASSIGNED HAZARD'
+  let statusColor = '#ef4444'
+  if (threat.engagement_status === 'in_progress') {
+    statusLabel = 'ENGAGEMENT ACTIVE'
+    statusColor = '#f59e0b'
+  } else if (threat.engagement_status === 'resolved') {
+    statusLabel = 'NEUTRALIZED'
+    statusColor = '#10b981'
+  }
+
+  const badgeText = isDrone ? 'UAV DRONE' : 'THREAT HAZARD'
+
+  // Action buttons inside panel
+  let actionButtonsHtml = ''
+
+  // 1. Take Responsibility (for EOD/sapper squads or units when unassigned)
+  const canTakeResp = hasEODSpecialist && threat.engagement_status === 'unassigned' && user?.role !== 'Radar'
+  if (canTakeResp) {
+    actionButtonsHtml += `
+      <button onclick="window.__tp_take_resp && window.__tp_take_resp('${threat.id}')"
+        style="width: 100%; padding: 5px 8px; margin-top: 5px; background: rgba(245, 158, 11, 0.2); border: 1px solid #f59e0b; color: #fbbf24; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
+        ⚡ TAKE RESPONSIBILITY
+      </button>
+    `
+  }
+
+  // 2. Neutralize / Resolve (for EOD specialist when not resolved)
+  const canNeutralize = hasEODSpecialist && threat.engagement_status !== 'resolved' && user?.role !== 'Radar'
+  if (canNeutralize) {
+    actionButtonsHtml += `
+      <button onclick="window.__tp_resolve && window.__tp_resolve('${threat.id}')"
+        style="width: 100%; padding: 5px 8px; margin-top: 4px; background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
+        ✓ NEUTRALIZE / RESOLVE
+      </button>
+    `
+  }
+
+  // 3. Remove / Archive Hazard (for Regional TOC or Main Command Center)
+  const canArchive = isCommandCenter
+  if (canArchive) {
+    actionButtonsHtml += `
+      <button onclick="window.__tp_archive && window.__tp_archive('${threat.id}')"
+        style="width: 100%; padding: 5px 8px; margin-top: 4px; background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; color: #f87171; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
+        ✕ REMOVE / ARCHIVE
+      </button>
+    `
+  }
+
+  // 4. View Full Details
+  actionButtonsHtml += `
+    <button onclick="window.__tp_details && window.__tp_details('${threat.id}')"
+      style="width: 100%; padding: 4px 8px; margin-top: 4px; background: rgba(0, 229, 255, 0.15); border: 1px solid #00e5ff; color: #67e8f9; border-radius: 4px; font-size: 10px; font-weight: bold; font-family: monospace; cursor: pointer; text-transform: uppercase;">
+      🔍 FULL INTEL REPORT
+    </button>
+  `
+
+  return `
+    <div class="tactical-prop-popup" style="min-width: 210px;">
+      <div class="prop-header">
+        <span class="prop-dot" style="background: ${statusColor}; box-shadow: 0 0 8px ${statusColor};"></span>
+        <span class="prop-title">${threat.name}</span>
+        <span class="prop-badge" style="color: ${statusColor}; border-color: ${statusColor}60; background: ${statusColor}20;">
+          ${badgeText}
+        </span>
+      </div>
+      <div class="prop-body">
+        <div class="prop-row">
+          <span class="prop-label">STATUS:</span>
+          <span class="prop-val" style="color: ${statusColor}; font-weight: bold;">${statusLabel}</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">CATEGORY:</span>
+          <span class="prop-val">${threat.threat_type.toUpperCase()}</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">POSITION:</span>
+          <span class="prop-val font-mono">${threat.lat.toFixed(5)}°, ${threat.lon.toFixed(5)}°</span>
+        </div>
+        ${
+          threat.altitude
+            ? `
+        <div class="prop-row">
+          <span class="prop-label">ALTITUDE:</span>
+          <span class="prop-val font-mono">${threat.altitude}m AGL</span>
+        </div>`
+            : ''
+        }
+        <div class="prop-row">
+          <span class="prop-label">DANGER RADIUS:</span>
+          <span class="prop-val font-mono">${radius}m (Subtle Boundary)</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ASSIGNED UNIT:</span>
+          <span class="prop-val" style="color: ${assignedSquad ? '#00e5ff' : '#94a3b8'};">
+            ${assignedSquad ? assignedSquad.name : 'UNASSIGNED'}
+          </span>
+        </div>
+        ${
+          isUnderIntrusion
+            ? `
+        <div class="prop-row" style="color: #ff0033; font-weight: bold; font-size: 9px; margin-top: 2px;">
+          <span>🚨 PERIMETER BREACH ACTIVE</span>
+        </div>`
+            : ''
+        }
+      </div>
+      <div style="margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(255,255,255,0.1);">
+        ${actionButtonsHtml}
+      </div>
+      <div class="prop-footer">CLICK ICON TO CLOSE</div>
+    </div>
+  `
+}
+
 // Calculate a safe Leaflet LatLngBounds representing a given radius around a point (in meters)
 function getRadiusBounds(lat: number, lon: number, radiusMeters = 10000): L.LatLngBounds {
   const latDelta = radiusMeters / 111320
@@ -218,6 +352,7 @@ export const TacticalMap: React.FC = () => {
   const zonesLayerRef = useRef<L.LayerGroup | null>(null)
   const pinMarkerRef = useRef<L.Marker | null>(null)
   const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
+  const threatMarkersRef = useRef<Map<string, L.Marker>>(new Map())
   const svgRendererRef = useRef<L.SVG | null>(null)
 
   // Auto-fit mode toggle & programmatic movement guard
@@ -236,6 +371,8 @@ export const TacticalMap: React.FC = () => {
     openAlertAtLocation,
     selectedZoneFilter,
     setSelectedZoneFilter,
+    addOrUpdateThreat,
+    removeThreat,
   } = useMapStore()
 
   const { user } = useAuthStore()
@@ -755,11 +892,86 @@ export const TacticalMap: React.FC = () => {
     })
   }, [squads, user, setSelectedEntity, focusRadius10km])
 
-  // Render Threats with Danger Radius buffer circle (150m)
+  // Register global window handlers for actions triggered inside threat pop-up panels
+  useEffect(() => {
+    ;(window as unknown as { __tp_take_resp?: (threatId: string) => Promise<void> }).__tp_take_resp = async (
+      threatId: string
+    ) => {
+      if (!user) return
+      try {
+        const updated = await api.threats.update(threatId, {
+          engagement_status: 'in_progress',
+          assigned_to_id: user.id,
+        })
+        addOrUpdateThreat(updated, user.id)
+      } catch (err) {
+        console.error('Failed to take responsibility for threat:', err)
+      }
+    }
+
+    ;(window as unknown as { __tp_resolve?: (threatId: string) => Promise<void> }).__tp_resolve = async (
+      threatId: string
+    ) => {
+      if (!user) return
+      try {
+        const updated = await api.threats.update(threatId, {
+          engagement_status: 'resolved',
+        })
+        addOrUpdateThreat(updated, user.id)
+      } catch (err) {
+        console.error('Failed to resolve threat:', err)
+      }
+    }
+
+    ;(window as unknown as { __tp_archive?: (threatId: string) => Promise<void> }).__tp_archive = async (
+      threatId: string
+    ) => {
+      if (!user) return
+      try {
+        const updated = await api.threats.update(threatId, {
+          status: 'inactive',
+        })
+        addOrUpdateThreat(updated, user.id)
+        removeThreat(threatId)
+      } catch (err) {
+        console.error('Failed to archive threat:', err)
+      }
+    }
+
+    ;(window as unknown as { __tp_details?: (threatId: string) => void }).__tp_details = (
+      threatId: string
+    ) => {
+      setSelectedEntity({ type: 'threat', id: threatId })
+    }
+
+    return () => {
+      delete (window as unknown as { __tp_take_resp?: unknown }).__tp_take_resp
+      delete (window as unknown as { __tp_resolve?: unknown }).__tp_resolve
+      delete (window as unknown as { __tp_archive?: unknown }).__tp_archive
+      delete (window as unknown as { __tp_details?: unknown }).__tp_details
+    }
+  }, [user, addOrUpdateThreat, removeThreat, setSelectedEntity])
+
+  // Render Threats: Icon-only markers, subtle unobtrusive border line (no area coloring), and toggleable action panels
   useEffect(() => {
     const threatsLayer = threatsLayerRef.current
     if (!threatsLayer) return
 
+    // Clean up markers of threats that are no longer active
+    const activeThreatIds = new Set(
+      Object.values(threats)
+        .filter((t) => t.status !== 'inactive')
+        .map((t) => t.id)
+    )
+
+    for (const [id, marker] of threatMarkersRef.current.entries()) {
+      if (!activeThreatIds.has(id)) {
+        marker.remove()
+        threatMarkersRef.current.delete(id)
+      }
+    }
+
+    // Clear auxiliary dynamic vector layers (danger circles and breach lines)
     threatsLayer.clearLayers()
 
     Object.values(threats).forEach((threat: Threat) => {
@@ -777,23 +989,20 @@ export const TacticalMap: React.FC = () => {
       const isDrone = threat.threat_type === 'drone' || threat.name.toLowerCase().includes('drone')
       const isRedZone = isUnderIntrusion || threat.engagement_status === 'unassigned' || threatColor === '#ef4444'
 
-      // Draw danger buffer circle (default 150m) with pulse animation for red zone
+      // Subtle, unobtrusive border line for threat danger zone: NO area-based coloring (fill: false)
       L.circle([threat.lat, threat.lon], {
         radius,
         renderer: svgRendererRef.current || undefined,
         color: isUnderIntrusion ? '#ff0033' : threatColor,
-        fillColor: isUnderIntrusion ? '#ff0033' : threatColor,
-        fillOpacity: isUnderIntrusion ? 0.42 : threat.engagement_status === 'resolved' ? 0.08 : 0.25,
-        weight: isUnderIntrusion ? 3.5 : isRedZone ? 2.5 : 1.5,
-        dashArray: isUnderIntrusion ? '4, 4' : threat.engagement_status === 'in_progress' ? '5, 5' : undefined,
-        className: isRedZone
-          ? isUnderIntrusion
-            ? 'threat-zone-intrusion-pulse'
-            : 'threat-zone-red-pulse'
-          : '',
+        fill: false,
+        fillOpacity: 0,
+        weight: isUnderIntrusion ? 1.8 : 1.2,
+        opacity: isUnderIntrusion ? 0.9 : 0.65,
+        dashArray: isUnderIntrusion ? '4, 4' : '5, 5',
+        interactive: false,
       }).addTo(threatsLayer)
 
-      // If under active intrusion, draw dashed tactical alert line to the endangered squad
+      // If under active intrusion, draw dashed alert line to the endangered squad
       if (isUnderIntrusion) {
         dangerZoneAlerts
           .filter((a) => a.threat_id === threat.id)
@@ -802,21 +1011,21 @@ export const TacticalMap: React.FC = () => {
             if (sq) {
               L.polyline([[threat.lat, threat.lon], [sq.lat, sq.lon]], {
                 color: '#ff0033',
-                weight: 2.5,
-                dashArray: '6, 6',
-                opacity: 0.9,
+                weight: 2,
+                dashArray: '5, 5',
+                opacity: 0.85,
               }).addTo(threatsLayer)
             }
           })
       }
 
-      // Threat marker icon: unified frame with icon and threat name INSIDE the frame, centered on [threat.lat, threat.lon]
+      // Icon-only tactical marker: marked strictly by one of two icons (drone or other threats), NO text label
+      const iconSize = 36
       const threatIconHtml = `
         <div style="
-          position: absolute;
-          left: 0;
-          top: 0;
-          transform: translate(-50%, -50%);
+          position: relative;
+          width: ${iconSize}px;
+          height: ${iconSize}px;
           cursor: pointer;
           pointer-events: auto;
           display: flex;
@@ -831,25 +1040,12 @@ export const TacticalMap: React.FC = () => {
               left: 50%;
               top: 50%;
               transform: translate(-50%, -50%);
-              width: 52px;
-              height: 52px;
-              border-radius: 50%;
-              border: 2px solid ${isUnderIntrusion ? '#ff0033' : '#ef4444'};
-              pointer-events: none;
-              animation: danger-sonar-ring ${isUnderIntrusion ? '0.9s' : '2s'} cubic-bezier(0, 0.2, 0.8, 1) infinite;
-            "></div>
-            <div style="
-              position: absolute;
-              left: 50%;
-              top: 50%;
-              transform: translate(-50%, -50%);
-              width: 52px;
-              height: 52px;
+              width: 44px;
+              height: 44px;
               border-radius: 50%;
               border: 1.5px solid ${isUnderIntrusion ? '#ff0033' : '#ef4444'};
               pointer-events: none;
-              animation: danger-sonar-ring ${isUnderIntrusion ? '0.9s' : '2s'} cubic-bezier(0, 0.2, 0.8, 1) infinite;
-              animation-delay: ${isUnderIntrusion ? '0.45s' : '1s'};
+              animation: danger-sonar-ring ${isUnderIntrusion ? '0.9s' : '2.2s'} cubic-bezier(0, 0.2, 0.8, 1) infinite;
             "></div>
           `
               : ''
@@ -857,42 +1053,18 @@ export const TacticalMap: React.FC = () => {
           <div style="
             position: relative;
             z-index: 2;
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            padding: 4px 9px 4px 7px;
-            background: rgba(10, 15, 29, 0.96);
+            width: 34px;
+            height: 34px;
+            background: rgba(10, 15, 29, 0.95);
             border: 2px solid ${isUnderIntrusion ? '#ff0033' : threatColor};
-            border-radius: 6px;
-            box-shadow: 0 0 ${isUnderIntrusion ? '20px #ef4444' : '10px ' + threatColor}80, 0 4px 12px rgba(0,0,0,0.8);
-            white-space: nowrap;
-            font-family: ui-monospace, monospace;
-            animation: ${isUnderIntrusion ? 'threat-pulse 0.8s infinite' : threat.engagement_status === 'unassigned' ? 'threat-pulse 1.8s infinite' : 'none'};
+            border-radius: ${isDrone ? '50%' : '8px'};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 ${isUnderIntrusion ? '16px #ef4444' : '8px ' + threatColor}80, 0 3px 8px rgba(0,0,0,0.8);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
           ">
-            <div style="
-              width: ${isDrone ? '24px' : '20px'};
-              height: ${isDrone ? '24px' : '20px'};
-              background: ${isUnderIntrusion ? '#dc2626' : threatColor};
-              border-radius: ${isDrone ? '50%' : '4px'};
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              flex-shrink: 0;
-            ">
-              ${
-                isDrone
-                  ? getDroneSvgString(16, '#ffffff')
-                  : '<span style="color: white; font-weight: 900; font-size: 13px; line-height: 1;">!</span>'
-              }
-            </div>
-            <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.15;">
-              <span style="font-size: 11px; font-weight: bold; color: #ffffff; letter-spacing: 0.02em;">
-                ${isUnderIntrusion ? '🚨 ' : ''}${threat.name}
-              </span>
-              <span style="font-size: 9px; color: ${isUnderIntrusion ? '#fca5a5' : '#94a3b8'};">
-                ${isDrone ? `UAV DRONE${threat.altitude ? ` • ${threat.altitude}m` : ''}` : threat.threat_type.toUpperCase()} • R: ${radius}m
-              </span>
-            </div>
+            ${isDrone ? getDroneSvgString(20, '#ffffff') : getOtherThreatSvgString(20, '#ffffff')}
           </div>
         </div>
       `
@@ -900,20 +1072,49 @@ export const TacticalMap: React.FC = () => {
       const threatIcon = L.divIcon({
         className: 'threat-marker-container',
         html: threatIconHtml,
-        iconSize: [0, 0],
-        iconAnchor: [0, 0],
+        iconSize: [iconSize, iconSize],
+        iconAnchor: [iconSize / 2, iconSize / 2],
       })
 
-      const marker = L.marker([threat.lat, threat.lon], { icon: threatIcon })
-      marker.on('click', (e) => {
-        L.DomEvent.stopPropagation(e)
-        setSelectedEntity({ type: 'threat', id: threat.id })
-        focusRadius10km(threat.lat, threat.lon)
-      })
+      const popupHtml = buildThreatPopupHtml(threat, squads, user, isUnderIntrusion)
 
-      marker.addTo(threatsLayer)
+      let marker = threatMarkersRef.current.get(threat.id)
+      if (marker) {
+        marker.setLatLng([threat.lat, threat.lon])
+        marker.setIcon(threatIcon)
+        marker.setPopupContent(popupHtml)
+        if (!threatsLayer.hasLayer(marker)) {
+          marker.addTo(threatsLayer)
+        }
+      } else {
+        const newMarker = L.marker([threat.lat, threat.lon], { icon: threatIcon })
+        newMarker.bindPopup(popupHtml, {
+          className: 'tactical-force-popup',
+          closeButton: true,
+          autoClose: false,
+          closeOnClick: false,
+          offset: [0, -18],
+        })
+
+        // Unregister Leaflet's internal auto-open click handler so our custom toggle controls it
+        newMarker.off(
+          'click',
+          (newMarker as unknown as { _openPopup: (e: L.LeafletMouseEvent) => void })._openPopup,
+          newMarker
+        )
+
+        // Custom toggle on click: clicking the icon toggles the pop-up panel (similar to team view)
+        newMarker.on('click', (e) => {
+          L.DomEvent.stopPropagation(e)
+          newMarker.togglePopup()
+          focusRadius10km(threat.lat, threat.lon)
+        })
+
+        newMarker.addTo(threatsLayer)
+        threatMarkersRef.current.set(threat.id, newMarker)
+      }
     })
-  }, [threats, squads, dangerZoneAlerts, setSelectedEntity, focusRadius10km])
+  }, [threats, squads, dangerZoneAlerts, user, focusRadius10km])
 
   return (
     <div className={`relative w-full h-full ${isPickingLocationOnMap ? 'cursor-crosshair' : ''}`}>

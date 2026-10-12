@@ -13,6 +13,7 @@ import {
   Shield,
 } from 'lucide-react'
 import { DroneIcon } from '../Common/DroneIcon'
+import { AddSoldierModal } from '../Forms/AddSoldierModal'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
 import { api } from '../../services/api'
@@ -34,6 +35,7 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
   const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState<'live' | 'roster' | 'alerts'>(initialTab)
   const [selectedSquad, setSelectedSquad] = useState<Squad | null>(null)
+  const [isAddSoldierModalOpen, setIsAddSoldierModalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
   // Sync tab when initialTab changes
@@ -197,6 +199,28 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
 
       {/* Content List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {activeTab === 'roster' && isMainAdmin && (
+          <div className="flex items-center justify-between pb-1.5 px-1 border-b border-slate-800/60 mb-2">
+            <span className="text-[10px] font-mono text-slate-400 uppercase">Manager Operations</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsAddSoldierModalOpen(true)}
+                className="px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-600 text-cyan-300 font-mono text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow"
+              >
+                <UserPlus className="w-3 h-3" />
+                <span>+ ADD SOLDIER</span>
+              </button>
+              <button
+                onClick={() => setIsUserRegistrationModalOpen(true)}
+                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 font-mono text-[10px] flex items-center gap-1 cursor-pointer"
+              >
+                <UserPlus className="w-3 h-3" />
+                <span>+ NEW FORCE</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'live' ? (
           /* Live Session View: ONLY currently active & transmitting forces */
           liveSquadList.length === 0 ? (
@@ -378,14 +402,23 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
                 : `SOLDIER ROSTER (${selectedSquad.soldiers?.length || 0})`}
             </span>
             {isMainAdmin && (
-              <button
-                onClick={() => handleDeactivateUnit(selectedSquad.id)}
-                disabled={isLoading}
-                className="text-[10px] px-2 py-1 bg-red-950 hover:bg-red-900 border border-red-700 text-red-300 rounded font-mono flex items-center space-x-1 cursor-pointer"
-              >
-                <UserX className="w-3 h-3" />
-                <span>DEACTIVATE</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setIsAddSoldierModalOpen(true)}
+                  className="text-[10px] px-2 py-1 bg-cyan-950 hover:bg-cyan-900 border border-cyan-600 text-cyan-300 rounded font-mono flex items-center space-x-1 cursor-pointer"
+                >
+                  <UserPlus className="w-3 h-3" />
+                  <span>ADD SOLDIER</span>
+                </button>
+                <button
+                  onClick={() => handleDeactivateUnit(selectedSquad.id)}
+                  disabled={isLoading}
+                  className="text-[10px] px-2 py-1 bg-red-950 hover:bg-red-900 border border-red-700 text-red-300 rounded font-mono flex items-center space-x-1 cursor-pointer"
+                >
+                  <UserX className="w-3 h-3" />
+                  <span>DEACTIVATE</span>
+                </button>
+              </div>
             )}
           </div>
 
@@ -423,6 +456,13 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Manager Add Soldier Modal */}
+      <AddSoldierModal
+        isOpen={isAddSoldierModalOpen}
+        onClose={() => setIsAddSoldierModalOpen(false)}
+        initialSquadId={selectedSquad?.id || null}
+      />
     </div>
   )
 }
