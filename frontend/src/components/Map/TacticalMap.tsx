@@ -160,36 +160,28 @@ function buildForcePopupHtml(squad: Squad, isStaleSignal: boolean): string {
   `
 }
 
+// Calculate a safe Leaflet LatLngBounds representing a given radius around a point (in meters)
+function getRadiusBounds(lat: number, lon: number, radiusMeters = 10000): L.LatLngBounds {
+  const latDelta = radiusMeters / 111320
+  const cosLat = Math.cos((lat * Math.PI) / 180)
+  const lonDelta = radiusMeters / (111320 * (cosLat === 0 ? 1 : Math.abs(cosLat)))
+  return L.latLngBounds([
+    [lat - latDelta, lon - lonDelta],
+    [lat + latDelta, lon + lonDelta],
+  ])
+}
+
 // Extract coordinates of all relevant active dynamic objects (ignoring static headquarters)
 function getRelevantCoordinates(
-  user: User | null,
+  _user: User | null,
   zoneFilter: 'Global' | 'North' | 'Center' | 'South',
   squads: Record<string, Squad>,
   threats: Record<string, Threat>
 ): [number, number][] {
-  let targetSector: 'Global' | 'North' | 'Center' | 'South' = 'Global'
-  if (user?.role === 'AreaCommandCenter') {
-    targetSector = (user.area as 'North' | 'Center' | 'South') || 'Center'
-  } else if (user?.role === 'MainCommandCenter') {
-    targetSector = zoneFilter
-  } else if (user?.area && user.area !== 'Global') {
-    targetSector = user.area as 'North' | 'Center' | 'South'
-  } else if (user?.id && squads[user.id]) {
-    const my = squads[user.id]
-    if (my.area && my.area !== 'Global') {
-      targetSector = my.area as 'North' | 'Center' | 'South'
-    } else if (my.lat >= 32.70) {
-      targetSector = 'North'
-    } else if (my.lat >= 31.90) {
-      targetSector = 'Center'
-    } else {
-      targetSector = 'South'
-    }
-  }
+  const targetSector: 'Global' | 'North' | 'Center' | 'South' = zoneFilter || 'Global'
 
-  const isSectorMatch = (lat: number, area?: string) => {
+  const isSectorMatch = (lat: number) => {
     if (targetSector === 'Global') return true
-    if (area && area === targetSector) return true
     if (targetSector === 'North') return lat >= 32.70
     if (targetSector === 'Center') return lat >= 31.90 && lat < 32.70
     if (targetSector === 'South') return lat < 31.90
@@ -201,7 +193,7 @@ function getRelevantCoordinates(
   // Add ONLY active dynamic forces (static objects like headquarters are completely ignored for zoom)
   Object.values(squads).forEach((sq) => {
     if (!isDynamicForce(sq)) return
-    if (isSectorMatch(sq.lat, sq.area)) {
+    if (isSectorMatch(sq.lat)) {
       points.push([sq.lat, sq.lon])
     }
   })
@@ -337,62 +329,82 @@ export const TacticalMap: React.FC = () => {
   }, [openAlertAtLocation])
 
   // Auto-adjust view to encompass the range between relevant objects in active sector (empty areas ignored)
-  const autoAdjustView = useCallback((animate = true) => {
-    const map = mapInstanceRef.current
-    if (!map) return
+  const autoAdjustView = useCallback(
+    (animate = true, zoneOverride?: 'Global' | 'North' | 'Center' | 'South') => {
+      const map = mapInstanceRef.current
+      if (!map) return
 
-    isProgrammaticMoveRef.current = true
+      isProgrammaticMoveRef.current = true
 
-    const points = getRelevantCoordinates(user, selectedZoneFilter, squads, threats)
+      const activeZone = zoneOverride || selectedZoneFilter
+      const points = getRelevantCoordinates(user, activeZone, squads, threats)
 
-    if (points.length >= 2) {
-      // Bounding box automatically spans from the first incident/unit to the last, ignoring empty zones
-      const bounds = L.latLngBounds(points)
-      if (animate) {
-        map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 15, duration: 1.0 })
-      } else {
-        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 })
-      }
-    } else if (points.length === 1) {
-      // Single object: focus on 10km radius around it
-      const circle = L.circle(points[0], { radius: 10000 })
-      if (animate) {
-        map.flyToBounds(circle.getBounds(), { padding: [20, 20], maxZoom: 13, duration: 1.0 })
-      } else {
-        map.fitBounds(circle.getBounds(), { padding: [20, 20] })
-      }
-    } else {
-      // Sector fallback if zero units or alerts currently exist
-      const targetSector =
-        user?.role === 'AreaCommandCenter'
-          ? (user.area as 'North' | 'Center' | 'South')
-          : user?.role === 'MainCommandCenter'
-          ? selectedZoneFilter
-          : (user?.area as 'North' | 'Center' | 'South')
-
-      if (targetSector && targetSector !== 'Global' && SECTOR_DEFS[targetSector]) {
+      if (points.length >= 2) {
+        // Bounding box automatically spans from the first incident/unit to the last, ignoring empty zones
+        const bounds = L.latLngBounds(points)
         if (animate) {
-          map.flyToBounds(SECTOR_DEFS[targetSector].bounds, { padding: [40, 40], maxZoom: 10, duration: 1.0 })
+          map.flyToBounds(bounds, { padding: [60, 60], maxZoom: 15, duration: 1.0 })
         } else {
-          map.fitBounds(SECTOR_DEFS[targetSector].bounds, { padding: [40, 40], maxZoom: 10 })
+          map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 })
+        }
+      } else if (points.length === 1) {
+        // Single object: focus on 10km radius around it using safe LatLngBounds
+        const bounds = getRadiusBounds(points[0][0], points[0][1], 10000)
+        if (animate) {
+          map.flyToBounds(bounds, { padding: [20, 20], maxZoom: 13, duration: 1.0 })
+        } else {
+          map.fitBounds(bounds, { padding: [20, 20] })
         }
       } else {
-        if (animate) {
-          map.flyToBounds([[29.5, 34.2], [33.4, 35.8]], { padding: [30, 30], duration: 1.0 })
+        // Sector fallback if zero units or alerts currently exist in the active zone
+        const targetSector =
+          activeZone !== 'Global'
+            ? activeZone
+            : user?.role === 'AreaCommandCenter'
+            ? (user.area as 'North' | 'Center' | 'South')
+            : 'Global'
+
+        if (targetSector && targetSector !== 'Global' && SECTOR_DEFS[targetSector]) {
+          if (animate) {
+            map.flyToBounds(SECTOR_DEFS[targetSector].bounds, {
+              padding: [40, 40],
+              maxZoom: 10,
+              duration: 1.0,
+            })
+          } else {
+            map.fitBounds(SECTOR_DEFS[targetSector].bounds, { padding: [40, 40], maxZoom: 10 })
+          }
         } else {
-          map.fitBounds([[29.5, 34.2], [33.4, 35.8]], { padding: [30, 30] })
+          if (animate) {
+            map.flyToBounds(
+              [
+                [29.5, 34.2],
+                [33.4, 35.8],
+              ],
+              { padding: [30, 30], duration: 1.0 }
+            )
+          } else {
+            map.fitBounds(
+              [
+                [29.5, 34.2],
+                [33.4, 35.8],
+              ],
+              { padding: [30, 30] }
+            )
+          }
         }
       }
-    }
-  }, [user, selectedZoneFilter, squads, threats])
+    },
+    [user, selectedZoneFilter, squads, threats]
+  )
 
   // Focus view on a 10km radius around a specific location (Force or Threat)
   const focusRadius10km = useCallback((lat: number, lon: number) => {
     const map = mapInstanceRef.current
     if (!map) return
     isProgrammaticMoveRef.current = true
-    const circle = L.circle([lat, lon], { radius: 10000 })
-    map.flyToBounds(circle.getBounds(), { padding: [20, 20], maxZoom: 13, duration: 1.0 })
+    const bounds = getRadiusBounds(lat, lon, 10000)
+    map.flyToBounds(bounds, { padding: [20, 20], maxZoom: 13, duration: 1.0 })
   }, [])
 
   // Toggle Auto-Fit view mode: When ON, focuses on sector/objects. When OFF, allows independent free navigation.
@@ -415,25 +427,24 @@ export const TacticalMap: React.FC = () => {
       if (!map) return
 
       isProgrammaticMoveRef.current = true
-      if (zone === 'Global') {
-        map.flyToBounds(
-          [
-            [29.5, 34.2],
-            [33.4, 35.8],
-          ],
-          { padding: [30, 30], duration: 1.0 }
-        )
-      } else {
-        const secDef = SECTOR_DEFS[zone]
-        if (secDef) {
-          map.flyToBounds(secDef.bounds, { padding: [40, 40], maxZoom: 10, duration: 1.0 })
-        }
-      }
 
       if (isAutoFitModeRef.current) {
-        setTimeout(() => {
-          autoAdjustView(true)
-        }, 500)
+        autoAdjustView(true, zone)
+      } else {
+        if (zone === 'Global') {
+          map.flyToBounds(
+            [
+              [29.5, 34.2],
+              [33.4, 35.8],
+            ],
+            { padding: [30, 30], duration: 1.0 }
+          )
+        } else {
+          const secDef = SECTOR_DEFS[zone]
+          if (secDef) {
+            map.flyToBounds(secDef.bounds, { padding: [40, 40], maxZoom: 10, duration: 1.0 })
+          }
+        }
       }
     },
     [setSelectedZoneFilter, autoAdjustView]
