@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import L from 'leaflet'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -226,6 +226,11 @@ export const TacticalMap: React.FC = () => {
   const pinMarkerRef = useRef<L.Marker | null>(null)
   const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
 
+  // Auto-fit mode toggle & programmatic movement guard
+  const [isAutoFitMode, setIsAutoFitMode] = useState<boolean>(false)
+  const isAutoFitModeRef = useRef<boolean>(false)
+  const isProgrammaticMoveRef = useRef<boolean>(false)
+
   const {
     squads,
     threats,
@@ -236,6 +241,7 @@ export const TacticalMap: React.FC = () => {
     setSelectedEntity,
     openAlertAtLocation,
     selectedZoneFilter,
+    setSelectedZoneFilter,
   } = useMapStore()
 
   const { user } = useAuthStore()
@@ -246,13 +252,22 @@ export const TacticalMap: React.FC = () => {
 
     // Center of Israel with Canvas renderer for max performance
     const map = L.map(mapContainerRef.current, {
-      center: [31.6, 34.9],
+      center: [31.5, 34.8],
       zoom: 8,
-      minZoom: 7,
-      maxZoom: 17,
+      minZoom: 6,
+      maxZoom: 18,
       preferCanvas: true,
       zoomControl: false,
     })
+
+    // Default view covers the entire map (all of Israel theater)
+    map.fitBounds(
+      [
+        [29.5, 34.2],
+        [33.4, 35.8],
+      ],
+      { padding: [30, 30] }
+    )
 
     // Tactical dark base tiles (Esri Dark Gray - 100% Free, No API Key, No Watermark)
     const darkTiles = L.tileLayer(
@@ -326,6 +341,8 @@ export const TacticalMap: React.FC = () => {
     const map = mapInstanceRef.current
     if (!map) return
 
+    isProgrammaticMoveRef.current = true
+
     const points = getRelevantCoordinates(user, selectedZoneFilter, squads, threats)
 
     if (points.length >= 2) {
@@ -337,10 +354,12 @@ export const TacticalMap: React.FC = () => {
         map.fitBounds(bounds, { padding: [60, 60], maxZoom: 15 })
       }
     } else if (points.length === 1) {
+      // Single object: focus on 10km radius around it
+      const circle = L.circle(points[0], { radius: 10000 })
       if (animate) {
-        map.flyTo(points[0], 13, { duration: 1.0 })
+        map.flyToBounds(circle.getBounds(), { padding: [20, 20], maxZoom: 13, duration: 1.0 })
       } else {
-        map.setView(points[0], 13)
+        map.fitBounds(circle.getBounds(), { padding: [20, 20] })
       }
     } else {
       // Sector fallback if zero units or alerts currently exist
@@ -367,7 +386,97 @@ export const TacticalMap: React.FC = () => {
     }
   }, [user, selectedZoneFilter, squads, threats])
 
-  // Automatically adjust view signature: runs when sector changes or relevant objects are updated
+  // Focus view on a 10km radius around a specific location (Force or Threat)
+  const focusRadius10km = useCallback((lat: number, lon: number) => {
+    const map = mapInstanceRef.current
+    if (!map) return
+    isProgrammaticMoveRef.current = true
+    const circle = L.circle([lat, lon], { radius: 10000 })
+    map.flyToBounds(circle.getBounds(), { padding: [20, 20], maxZoom: 13, duration: 1.0 })
+  }, [])
+
+  // Toggle Auto-Fit view mode: When ON, focuses on sector/objects. When OFF, allows independent free navigation.
+  const toggleAutoFit = useCallback(() => {
+    setIsAutoFitMode((prev) => {
+      const next = !prev
+      isAutoFitModeRef.current = next
+      if (next) {
+        autoAdjustView(true)
+      }
+      return next
+    })
+  }, [autoAdjustView])
+
+  // Handle Zone Selection: Updates zone filter and navigates to the zone
+  const handleZoneSelect = useCallback(
+    (zone: 'Global' | 'North' | 'Center' | 'South') => {
+      setSelectedZoneFilter(zone)
+      const map = mapInstanceRef.current
+      if (!map) return
+
+      isProgrammaticMoveRef.current = true
+      if (zone === 'Global') {
+        map.flyToBounds(
+          [
+            [29.5, 34.2],
+            [33.4, 35.8],
+          ],
+          { padding: [30, 30], duration: 1.0 }
+        )
+      } else {
+        const secDef = SECTOR_DEFS[zone]
+        if (secDef) {
+          map.flyToBounds(secDef.bounds, { padding: [40, 40], maxZoom: 10, duration: 1.0 })
+        }
+      }
+
+      if (isAutoFitModeRef.current) {
+        setTimeout(() => {
+          autoAdjustView(true)
+        }, 500)
+      }
+    },
+    [setSelectedZoneFilter, autoAdjustView]
+  )
+
+  // Zoom Revert Listener: In "auto-fit view" mode, zooming in or out reverts view to auto-fit default
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    if (!map) return
+
+    let revertTimer: ReturnType<typeof setTimeout> | null = null
+
+    const handleZoomEnd = () => {
+      if (isProgrammaticMoveRef.current) {
+        return
+      }
+      if (isAutoFitModeRef.current) {
+        if (revertTimer) clearTimeout(revertTimer)
+        revertTimer = setTimeout(() => {
+          autoAdjustView(true)
+        }, 200)
+      }
+    }
+
+    const handleMoveEnd = () => {
+      if (isProgrammaticMoveRef.current) {
+        setTimeout(() => {
+          isProgrammaticMoveRef.current = false
+        }, 150)
+      }
+    }
+
+    map.on('zoomend', handleZoomEnd)
+    map.on('moveend', handleMoveEnd)
+
+    return () => {
+      if (revertTimer) clearTimeout(revertTimer)
+      map.off('zoomend', handleZoomEnd)
+      map.off('moveend', handleMoveEnd)
+    }
+  }, [autoAdjustView])
+
+  // Automatically adjust view signature: runs ONLY when auto-fit mode is ON and sector/objects change
   const relevantSignature = useMemo(() => {
     const points = getRelevantCoordinates(user, selectedZoneFilter, squads, threats)
     return `${user?.role}_${selectedZoneFilter}_${points.length}_${points
@@ -378,11 +487,11 @@ export const TacticalMap: React.FC = () => {
   const prevSignatureRef = useRef<string>('')
 
   useEffect(() => {
-    if (relevantSignature !== prevSignatureRef.current) {
+    if (isAutoFitMode && relevantSignature !== prevSignatureRef.current) {
       prevSignatureRef.current = relevantSignature
       autoAdjustView(true)
     }
-  }, [relevantSignature, autoAdjustView])
+  }, [isAutoFitMode, relevantSignature, autoAdjustView])
 
   // Render Operational Zones & Authorized Sector Visualizations
   useEffect(() => {
@@ -630,13 +739,14 @@ export const TacticalMap: React.FC = () => {
           L.DomEvent.stopPropagation(e)
           newMarker.togglePopup()
           setSelectedEntity({ type: 'squad', id: squad.id })
+          focusRadius10km(squad.lat, squad.lon)
         })
 
         newMarker.addTo(markersLayer)
         squadMarkersRef.current.set(squad.id, newMarker)
       }
     })
-  }, [squads, user, setSelectedEntity])
+  }, [squads, user, setSelectedEntity, focusRadius10km])
 
   // Render Threats with Danger Radius buffer circle (150m)
   useEffect(() => {
@@ -728,11 +838,12 @@ export const TacticalMap: React.FC = () => {
       marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e)
         setSelectedEntity({ type: 'threat', id: threat.id })
+        focusRadius10km(threat.lat, threat.lon)
       })
 
       marker.addTo(threatsLayer)
     })
-  }, [threats, squads, dangerZoneAlerts, setSelectedEntity])
+  }, [threats, squads, dangerZoneAlerts, setSelectedEntity, focusRadius10km])
 
   return (
     <div className={`relative w-full h-full ${isPickingLocationOnMap ? 'cursor-crosshair' : ''}`}>
@@ -742,30 +853,40 @@ export const TacticalMap: React.FC = () => {
       {/* Auto-Fit Range HUD Button */}
       <div className="absolute top-4 left-4 z-[999] hud-panel px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-2 font-mono text-xs">
         <button
-          onClick={() => autoAdjustView(true)}
-          title="Auto-adjust zoom to span between all relevant objects in active sector (empty areas ignored)"
-          className="flex items-center space-x-1.5 px-2 py-1 rounded bg-slate-900/80 hover:bg-cyan-950 border border-slate-700 hover:border-cyan-500 text-slate-300 hover:text-cyan-300 transition-colors cursor-pointer text-[11px] font-bold"
+          onClick={toggleAutoFit}
+          title={
+            isAutoFitMode
+              ? 'Auto-Fit mode is ON (zooming in/out reverts to auto-fit default). Click to turn OFF for independent navigation.'
+              : 'Auto-Fit mode is OFF (independent navigation enabled). Click to activate Auto-Fit view mode.'
+          }
+          className={`flex items-center space-x-1.5 px-2.5 py-1 rounded transition-all cursor-pointer text-[11px] font-bold border ${
+            isAutoFitMode
+              ? 'bg-cyan-950 border-cyan-500 text-cyan-300 shadow-md shadow-cyan-950/60'
+              : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-300'
+          }`}
         >
-          <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
-          <span>AUTO-FIT VIEW</span>
+          <Maximize2 className={`w-3.5 h-3.5 ${isAutoFitMode ? 'text-cyan-400' : 'text-slate-400'}`} />
+          <span>AUTO-FIT VIEW: {isAutoFitMode ? 'ON' : 'OFF'}</span>
         </button>
       </div>
 
-      {/* Authorized Zone HUD Badge for Regional Command Centers */}
-      {user?.role === 'AreaCommandCenter' && (
-        <div className="absolute top-4 right-4 z-[999] hud-panel px-3 py-2 rounded-lg border border-purple-500/60 shadow-xl flex items-center space-x-2 font-mono text-xs">
-          <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
-          <span className="text-purple-300 font-bold tracking-wide">
-            AUTHORIZED SECTOR: {user.area.toUpperCase()}
-          </span>
+      {/* Floating Map Zone View Switcher */}
+      <div className="absolute top-4 right-4 z-[999] hud-panel px-3 py-1.5 rounded-lg border border-slate-700 shadow-xl flex items-center space-x-1.5 font-mono text-xs">
+        <span className="text-slate-400 font-bold mr-1 text-[11px]">ZONE:</span>
+        {(['Global', 'North', 'Center', 'South'] as const).map((zone) => (
           <button
-            onClick={() => autoAdjustView(true)}
-            className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/80 hover:bg-purple-900 border border-purple-600 text-purple-200 ml-1 cursor-pointer"
+            key={zone}
+            onClick={() => handleZoneSelect(zone)}
+            className={`px-2 py-0.5 rounded text-[11px] font-bold transition-all cursor-pointer border ${
+              selectedZoneFilter === zone
+                ? 'bg-cyan-950 border-cyan-500 text-cyan-300 shadow-md shadow-cyan-950/60'
+                : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-slate-800'
+            }`}
           >
-            FOCUS
+            {zone.toUpperCase()}
           </button>
-        </div>
-      )}
+        ))}
+      </div>
 
       {/* Pin Drop Notice Bar when user is picking location */}
       {isPickingLocationOnMap && (
