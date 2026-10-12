@@ -24,6 +24,9 @@ class ThreatCreate(ThreatBase):
     lat: float = Field(..., ge=29.0, le=34.0)
     lon: float = Field(..., ge=33.5, le=36.5)
     altitude: float | None = Field(None, ge=0.0)
+    soldier_id: str | None = Field(
+        None, pattern=r"^\d{7}$", description="7-digit military ID of the reporting soldier/operator"
+    )
 
     @model_validator(mode="after")
     def validate_type_consistency(self):

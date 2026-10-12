@@ -11,6 +11,7 @@ from app.api.dependencies import get_current_user
 from app.core.config import settings
 from app.core.errors import AppException
 from app.db.postgres import get_db
+from app.models.soldier import Soldier
 from app.models.threat import Threat
 from app.models.user import User
 from app.schemas.threat import ThreatCreate, ThreatResponse, ThreatUpdate
@@ -74,6 +75,33 @@ async def create_threat(
                 message=f"AreaCommandCenter '{current_user.area}' can only create threats within its operational sector",
             )
 
+    # 3. Attribution: Determine the reporting soldier/operator
+    reporting_soldier_id = None
+    if req.soldier_id:
+        s_stmt = select(Soldier).where(Soldier.id == req.soldier_id)
+        s_res = await session.execute(s_stmt)
+        soldier = s_res.scalar_one_or_none()
+        if not soldier:
+            raise AppException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                code="NOT_FOUND",
+                message=f"Reporting soldier with ID '{req.soldier_id}' not found",
+            )
+        # Verify soldier belongs to this command center / unit (MainCommandCenter can attribute to any soldier)
+        if (
+            current_user.role != "MainCommandCenter"
+            and soldier.squad_id != current_user.id
+            and current_user.soldier_id != req.soldier_id
+        ):
+            raise AppException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="FORBIDDEN",
+                message=f"Soldier '{req.soldier_id}' does not belong to unit '{current_user.name}'",
+            )
+        reporting_soldier_id = soldier.id
+    else:
+        reporting_soldier_id = current_user.soldier_id
+
     new_threat = Threat(
         name=req.name,
         description=req.description,
@@ -87,7 +115,7 @@ async def create_threat(
         radius=req.radius,
         status="active",
         created_by_id=current_user.id,
-        created_by_soldier_id=current_user.soldier_id,
+        created_by_soldier_id=reporting_soldier_id,
     )
     session.add(new_threat)
     await session.flush()
@@ -102,7 +130,7 @@ async def create_threat(
         ip_address=client_ip,
     )
     await session.commit()
-    await session.refresh(new_threat)
+    await session.refresh(new_threat, ["created_by", "created_by_soldier"])
 
     resp = ThreatResponse.from_threat(new_threat, req.lat, req.lon)
     try:

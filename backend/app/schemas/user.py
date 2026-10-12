@@ -51,6 +51,8 @@ class UserResponse(BaseModel):
     description: str | None = None
     status: UserStatus
     soldier_id: str | None = None
+    soldier: SoldierResponse | None = None
+    soldiers: list[SoldierResponse] = []
 
     model_config = {"from_attributes": True}
 
@@ -58,8 +60,6 @@ class UserResponse(BaseModel):
 class AdminUserResponse(UserResponse):
     lat: float | None = None
     lon: float | None = None
-    soldiers: list[SoldierResponse] = []
-    soldier: SoldierResponse | None = None
     is_logged_in: bool = False
     last_activity_at: datetime | None = None
     created_at: datetime

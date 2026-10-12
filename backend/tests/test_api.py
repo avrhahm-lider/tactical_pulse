@@ -431,3 +431,23 @@ async def test_soldiers_crud_and_attribution():
         assert "created_by_unit_name" in first_threat
         assert first_threat["created_by_unit_name"] is not None
 
+        # 7. Create threat with explicit soldier attribution
+        created_res = await client.post(
+            "/api/v1/threats",
+            json={
+                "name": "Operator Reported Hostile Drone",
+                "threat_type": "drone",
+                "severity_level": "critical",
+                "lat": 32.0850,
+                "lon": 34.7850,
+                "altitude": 180.0,
+                "soldier_id": "1000001",
+            },
+            headers=headers,
+        )
+        assert created_res.status_code == 201
+        created_data = created_res.json()
+        assert created_data["created_by_soldier_id"] == "1000001"
+        assert created_data["created_by_soldier_name"] == "David Cohen"
+        assert created_data["created_by_unit_name"] == "Main Command Center"
+
