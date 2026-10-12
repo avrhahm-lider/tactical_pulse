@@ -21,6 +21,7 @@ from app.services.spatial import (
     get_visible_threats_query,
     is_lat_in_area,
 )
+from app.simulator.engine import simulator_engine
 from app.sockets.server import broadcast_threat_event
 
 router = APIRouter(prefix="/threats", tags=["Threats Management"])
@@ -35,7 +36,13 @@ async def list_threats(
     current_user: User = Depends(get_current_user),
 ):
     caller_coords = await get_caller_coordinates(session, current_user.id)
-    stmt = get_visible_threats_query(current_user, caller_coords, status_filter=status_filter)
+    include_resolved = engagement_status is not None
+    stmt = get_visible_threats_query(
+        current_user,
+        caller_coords,
+        status_filter=status_filter,
+        include_resolved=include_resolved,
+    )
 
     if engagement_status:
         stmt = stmt.where(Threat.engagement_status == engagement_status)
@@ -244,15 +251,17 @@ async def update_threat(
         threat.engagement_status = "in_progress"
 
     elif req.engagement_status == "resolved":
-        # Drone threats: ONLY Radar can confirm drone is destroyed!
+        # Drone threats: Radar OR Command Center can confirm drone is destroyed/shot down!
         if threat.threat_type == "drone":
-            if current_user.role != "Radar":
+            if current_user.role not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
                 raise AppException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     code="FORBIDDEN",
-                    message="Only Radar units can report and confirm that an enemy drone has been destroyed",
+                    message="Only Radar units or Command Center can confirm that an enemy drone has been shot down",
                 )
             threat.engagement_status = "resolved"
+            threat.status = "inactive"
+            simulator_engine.stop_drone(threat.id)
         # Explosive IEDs can only be resolved by SapperSquad or Command Center
         elif threat.threat_type == "explosive":
             if current_user.role not in ["SapperSquad", "MainCommandCenter", "AreaCommandCenter"]:
@@ -262,6 +271,7 @@ async def update_threat(
                     message="Only SapperSquad or Command Center can resolve explosive hazards",
                 )
             threat.engagement_status = "resolved"
+            threat.status = "inactive"
         # Regular movable threats: assigned squad or command center
         else:
             if is_field_unit and threat.assigned_to_id != current_user.id and current_user.role not in ["MainCommandCenter", "AreaCommandCenter"]:
@@ -271,6 +281,7 @@ async def update_threat(
                     message="Only the assigned squad or Command Center can resolve this threat",
                 )
             threat.engagement_status = "resolved"
+            threat.status = "inactive"
 
     elif req.engagement_status == "unassigned":
         threat.engagement_status = "unassigned"
@@ -314,13 +325,15 @@ async def update_threat(
     # 5. Lifecycle Deactivation
     if req.status == "inactive":
         if threat.threat_type == "drone":
-            if current_user.role != "Radar":
+            if current_user.role not in ["Radar", "MainCommandCenter", "AreaCommandCenter"]:
                 raise AppException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     code="FORBIDDEN",
-                    message="Only Radar units can report that a drone has been destroyed and deactivate its track",
+                    message="Only Radar units or Command Center can report that a drone has been destroyed and deactivate its track",
                 )
             threat.status = "inactive"
+            threat.engagement_status = "resolved"
+            simulator_engine.stop_drone(threat.id)
         elif threat.engagement_status == "in_progress":
             raise AppException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -335,6 +348,9 @@ async def update_threat(
             )
         else:
             threat.status = "inactive"
+            threat.engagement_status = "resolved"
+            if threat.threat_type == "drone":
+                simulator_engine.stop_drone(threat.id)
     elif req.status == "active":
         threat.status = "active"
 

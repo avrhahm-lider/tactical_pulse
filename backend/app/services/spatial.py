@@ -110,6 +110,7 @@ def get_visible_threats_query(
     caller: User,
     caller_coords: tuple[float, float] | None,
     status_filter: str | None = "active",
+    include_resolved: bool = False,
 ):
     """
     Builds SQL query for threats visible to caller:
@@ -124,6 +125,8 @@ def get_visible_threats_query(
     )
     if status_filter and status_filter != "all":
         stmt = stmt.where(Threat.status == status_filter)
+        if status_filter == "active" and not include_resolved:
+            stmt = stmt.where(Threat.engagement_status != "resolved")
 
     if caller.role == "MainCommandCenter":
         return stmt

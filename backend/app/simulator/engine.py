@@ -347,6 +347,20 @@ class SimulatorEngine:
                 self._persist_squad_coords(squad_id, lat, lon, heading, area, now)
             )
 
+    def stop_drone(self, threat_id: UUID | str) -> None:
+        """
+        Immediately halts autonomous flight loop and removes drone from simulation state when shot down.
+        """
+        tid_str = str(threat_id)
+        drone_key = f"drone_{tid_str}"
+        task = self._tasks.pop(drone_key, None)
+        if task and not task.done():
+            task.cancel()
+        for k in list(self._latest_drone_state.keys()):
+            if str(k) == tid_str:
+                self._latest_drone_state.pop(k, None)
+        self._step_indices.pop(tid_str, None)
+
     async def update_drone_location(
         self,
         threat_id: UUID,
@@ -362,6 +376,11 @@ class SimulatorEngine:
         Pushes real-time UAV aerial telemetry and tests proximity danger checks.
         Throttles PostgreSQL persistence to prevent connection pool exhaustion.
         """
+        drone_key = f"drone_{threat_id}"
+        # If flight task was cancelled / drone was shot down, ignore further tick updates
+        if not force_db and drone_key not in self._tasks:
+            return
+
         now = datetime.now(UTC)
         self._latest_drone_state[threat_id] = (lat, lon, altitude, now)
 
@@ -381,7 +400,6 @@ class SimulatorEngine:
         await broadcast_threat_event("threat_updated", payload)
 
         # Throttle Postgres persistence: max once every 3.0s per drone
-        drone_key = f"drone_{threat_id}"
         now_ts = asyncio.get_event_loop().time()
         if drone_key not in self._db_save_in_flight and (
             force_db or (now_ts - self._last_db_save.get(drone_key, 0.0) >= 3.0)
@@ -418,6 +436,8 @@ class SimulatorEngine:
         step = self._step_indices.get(str(threat_id), 0)
         try:
             while True:
+                if f"drone_{threat_id}" not in self._tasks:
+                    break
                 lat, lon, alt = path[step % total]
                 await self.update_drone_location(
                     threat_id=threat_id,

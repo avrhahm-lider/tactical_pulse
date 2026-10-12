@@ -370,6 +370,48 @@ async def test_drone_altitude_rbac_protection():
         assert patch_res.status_code == 403
         assert patch_res.json()["error"]["code"] == "FORBIDDEN"
 
+        # Regular squad attempts to resolve/confirm drone destroyed -> FORBIDDEN
+        resolve_squad = await client.patch(
+            f"/api/v1/threats/{drone_id}",
+            json={"engagement_status": "resolved"},
+            headers=headers,
+        )
+        assert resolve_squad.status_code == 403
+        assert resolve_squad.json()["error"]["code"] == "FORBIDDEN"
+
+        # Admin login
+        admin_login = await client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "admin123"},
+        )
+        admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
+
+        # Admin can update drone altitude/telemetry
+        admin_patch_alt = await client.patch(
+            f"/api/v1/threats/{drone_id}",
+            json={"altitude": 550.0},
+            headers=admin_headers,
+        )
+        assert admin_patch_alt.status_code == 200
+        assert admin_patch_alt.json()["altitude"] == 550.0
+
+        # Admin can confirm drone shot down / destroyed (resolved)
+        admin_shootdown = await client.patch(
+            f"/api/v1/threats/{drone_id}",
+            json={"engagement_status": "resolved"},
+            headers=admin_headers,
+        )
+        assert admin_shootdown.status_code == 200
+        shootdown_data = admin_shootdown.json()
+        assert shootdown_data["engagement_status"] == "resolved"
+        assert shootdown_data["status"] == "inactive"
+
+        # Verify destroyed drone completely disappears from tactical map snapshot
+        map_res = await client.get("/api/v1/map/snapshot", headers=admin_headers)
+        assert map_res.status_code == 200
+        active_threat_ids = [t["id"] for t in map_res.json()["threats"]]
+        assert drone_id not in active_threat_ids
+
 
 @pytest.mark.asyncio
 async def test_single_active_session_and_reset():

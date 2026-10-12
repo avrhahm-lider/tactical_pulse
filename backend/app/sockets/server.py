@@ -390,6 +390,11 @@ async def broadcast_threat_event(event_name: str, threat_dict: dict):
                 for c_sid, c_info in list(_connected_clients.items()):
                     if str(c_info.get("user_id")) == sq_id:
                         await sio.emit("danger_zone_cleared", {"id": k, "squad_id": sq_id, "threat_id": t_id}, room=c_sid)
+        # Emit explicit threat_removed event so all clients remove the marker from maps
+        try:
+            await sio.emit("threat_removed", {"id": t_id})
+        except Exception:
+            pass
     else:
         _active_threats_cache[t_id] = threat_dict
 
