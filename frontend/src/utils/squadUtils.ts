@@ -78,3 +78,13 @@ export function getActiveTransmittingCount(
 
   return transmitting.length > 0 ? transmitting.length : 1
 }
+
+/**
+ * Counts all active online connections in the roster (everyone in the system).
+ */
+export function getOnlineRosterCount(
+  squads: Record<string, Squad> | Squad[]
+): number {
+  const squadList = Array.isArray(squads) ? squads : Object.values(squads)
+  return squadList.filter((s) => s.status === 'active').length
+}

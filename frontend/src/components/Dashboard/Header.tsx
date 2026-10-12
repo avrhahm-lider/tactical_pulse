@@ -9,13 +9,14 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useMapStore } from '../../store/useMapStore'
-import { getActiveTransmittingCount } from '../../utils/squadUtils'
+import { getActiveTransmittingCount, getOnlineRosterCount } from '../../utils/squadUtils'
 
 interface HeaderProps {
   onOpenCreateThreat: () => void
   onToggleUnitDrawer: () => void
   isUnitDrawerOpen: boolean
   onOpenLiveUnitsList?: () => void
+  onOpenRosterList?: () => void
   onOpenAlertsList?: () => void
 }
 
@@ -24,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleUnitDrawer,
   isUnitDrawerOpen,
   onOpenLiveUnitsList,
+  onOpenRosterList,
   onOpenAlertsList,
 }) => {
   const { user, logout } = useAuthStore()
@@ -36,8 +38,10 @@ export const Header: React.FC<HeaderProps> = ({
     (t) => t.status === 'active' && t.engagement_status !== 'resolved'
   ).length
 
-  // Only count currently active & transmitting field units (excluding static headquarters and radar)
-  const activeSquadCount = getActiveTransmittingCount(squads, user)
+  // Live transmitting forces count (e.g. 1)
+  const liveCount = getActiveTransmittingCount(squads, user)
+  // All online users / units in roster (e.g. 6)
+  const rosterCount = getOnlineRosterCount(squads)
 
   // Area badge color
   const getAreaColor = (area?: string) => {
@@ -75,14 +79,14 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Live Indicators (Icon + Number only, Clickable, Framed with Solid Background) */}
         <div className="flex items-center space-x-3 pl-4 border-l border-slate-800">
-          {/* Live Indicator (Green) -> Click opens connected locations / units list */}
+          {/* Live Indicator (Green) -> Click opens live session active forces list */}
           <button
             onClick={onOpenLiveUnitsList || onToggleUnitDrawer}
-            title="Active Connected Locations & Forces (Click to view Roster)"
+            title="Live Active Session (Click to view live transmitting forces)"
             className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/90 hover:bg-emerald-900/90 border border-emerald-600/80 text-emerald-300 font-mono text-xs transition-all shadow-sm shadow-emerald-950/50 cursor-pointer shrink-0"
           >
             <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-            <span className="font-bold text-emerald-300 leading-none">{activeSquadCount}</span>
+            <span className="font-bold text-emerald-300 leading-none">{liveCount}</span>
           </button>
 
           {/* Alert Indicator (Red) -> Click opens active alerts list (Frame contained, no text spilling) */}
@@ -108,9 +112,10 @@ export const Header: React.FC<HeaderProps> = ({
           <span>OPEN ALERT</span>
         </button>
 
-        {/* Toggle Unit Drawer */}
+        {/* Toggle Unit Drawer / Roster */}
         <button
-          onClick={onToggleUnitDrawer}
+          onClick={onOpenRosterList || onToggleUnitDrawer}
+          title="Operational Roster (Click to view all online users and forces)"
           className={`px-3.5 py-2 rounded-lg font-mono text-xs font-semibold tracking-wider flex items-center space-x-2 border transition-all cursor-pointer ${
             isUnitDrawerOpen
               ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300'
@@ -118,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
           }`}
         >
           <Users className="w-4 h-4 text-cyan-400" />
-          <span>ROSTER ({activeSquadCount})</span>
+          <span>ROSTER ({rosterCount})</span>
         </button>
 
         {/* User Badge */}

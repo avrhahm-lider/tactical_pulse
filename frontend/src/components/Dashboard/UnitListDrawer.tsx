@@ -9,6 +9,8 @@ import {
   AlertTriangle,
   ChevronRight,
   Flame,
+  Users,
+  Shield,
 } from 'lucide-react'
 import { useMapStore } from '../../store/useMapStore'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -19,17 +21,17 @@ import { isHQOrRadar, isSquadTransmitting } from '../../utils/squadUtils'
 interface UnitListDrawerProps {
   isOpen: boolean
   onClose: () => void
-  initialTab?: 'units' | 'alerts'
+  initialTab?: 'live' | 'roster' | 'alerts'
 }
 
 export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
   isOpen,
   onClose,
-  initialTab = 'units',
+  initialTab = 'roster',
 }) => {
   const { squads, threats, removeSquad, setIsUserRegistrationModalOpen, setSelectedEntity } = useMapStore()
   const { user } = useAuthStore()
-  const [activeTab, setActiveTab] = useState<'units' | 'alerts'>(initialTab)
+  const [activeTab, setActiveTab] = useState<'live' | 'roster' | 'alerts'>(initialTab)
   const [selectedSquad, setSelectedSquad] = useState<Squad | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
@@ -41,8 +43,22 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
   }, [initialTab, isOpen])
 
   const isMainAdmin = user?.role === 'MainCommandCenter'
-  // Exclude static Headquarters and Radar installations
-  const squadList = Object.values(squads).filter((sq) => !isHQOrRadar(sq))
+
+  // 1. All online entities in roster (Everyone who is active in the system, count = 6)
+  const allSquadsList = Object.values(squads)
+  const rosterList = allSquadsList.filter((sq) => sq.status === 'active')
+
+  // 2. Live session transmitting units only (Field units currently transmitting telemetry)
+  const fieldSquadList = rosterList.filter((sq) => !isHQOrRadar(sq))
+  const transmittingList = fieldSquadList.filter((sq) => isSquadTransmitting(sq, user, fieldSquadList))
+  const liveSquadList =
+    transmittingList.length > 0
+      ? transmittingList
+      : fieldSquadList.length > 0
+      ? [fieldSquadList[0]]
+      : []
+
+  // 3. Active tactical alerts
   const activeThreatList = Object.values(threats).filter(
     (t) => t.status === 'active' && t.engagement_status !== 'resolved'
   )
@@ -62,6 +78,41 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
     }
   }
 
+  const getRoleBadge = (sq: Squad) => {
+    switch (sq.role) {
+      case 'MainCommandCenter':
+        return (
+          <span className="text-[9px] px-1.5 py-0.5 rounded border font-semibold bg-purple-950/70 text-purple-300 border-purple-700">
+            MAIN COMMAND HQ
+          </span>
+        )
+      case 'AreaCommandCenter':
+        return (
+          <span className="text-[9px] px-1.5 py-0.5 rounded border font-semibold bg-indigo-950/70 text-indigo-300 border-indigo-700">
+            REGIONAL HQ ({sq.area.toUpperCase()})
+          </span>
+        )
+      case 'Radar':
+        return (
+          <span className="text-[9px] px-1.5 py-0.5 rounded border font-semibold bg-sky-950/70 text-sky-300 border-sky-700">
+            TACTICAL RADAR
+          </span>
+        )
+      case 'SapperSquad':
+        return (
+          <span className="text-[9px] px-1.5 py-0.5 rounded border font-semibold bg-amber-950/70 text-amber-300 border-amber-700">
+            SAPPER SQUAD
+          </span>
+        )
+      default:
+        return (
+          <span className="text-[9px] px-1.5 py-0.5 rounded border font-semibold bg-emerald-950/70 text-emerald-300 border-emerald-700">
+            TACTICAL SQUAD
+          </span>
+        )
+    }
+  }
+
   if (!isOpen) return null
 
   return (
@@ -69,17 +120,23 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
       {/* Header */}
       <div className="p-4 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          {activeTab === 'units' ? (
+          {activeTab === 'live' ? (
             <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
+          ) : activeTab === 'roster' ? (
+            <Users className="w-5 h-5 text-cyan-400" />
           ) : (
             <AlertTriangle className="w-5 h-5 text-red-400" />
           )}
           <h2 className="font-mono text-sm font-bold text-white tracking-wider">
-            {activeTab === 'units' ? 'OPERATIONAL ROSTER' : 'ACTIVE TACTICAL ALERTS'}
+            {activeTab === 'live'
+              ? 'LIVE ACTIVE SESSION'
+              : activeTab === 'roster'
+              ? 'OPERATIONAL ROSTER'
+              : 'ACTIVE TACTICAL ALERTS'}
           </h2>
         </div>
         <div className="flex items-center space-x-2">
-          {activeTab === 'units' && (
+          {activeTab !== 'alerts' && (
             <button
               onClick={() => setIsUserRegistrationModalOpen(true)}
               title="Register new force or headquarters"
@@ -98,23 +155,35 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
         </div>
       </div>
 
-      {/* Tabs Switcher: Units vs Alerts */}
-      <div className="grid grid-cols-2 p-2 gap-1.5 border-b border-slate-800/80 bg-slate-950/60 font-mono text-xs">
+      {/* Tabs Switcher: Live vs Roster vs Alerts */}
+      <div className="grid grid-cols-3 p-2 gap-1.5 border-b border-slate-800/80 bg-slate-950/60 font-mono text-xs">
         <button
-          onClick={() => setActiveTab('units')}
-          className={`py-1.5 px-2 rounded-lg flex items-center justify-center space-x-2 transition-all cursor-pointer border ${
-            activeTab === 'units'
+          onClick={() => setActiveTab('live')}
+          className={`py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer border ${
+            activeTab === 'live'
               ? 'bg-emerald-950/80 border-emerald-600 text-emerald-300 font-bold shadow-sm shadow-emerald-950/40'
               : 'bg-slate-900/50 hover:bg-slate-800 border-slate-800 text-slate-400'
           }`}
         >
           <Radio className="w-3.5 h-3.5 text-emerald-400" />
-          <span>UNITS ({squadList.length})</span>
+          <span>LIVE ({liveSquadList.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('roster')}
+          className={`py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer border ${
+            activeTab === 'roster'
+              ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 font-bold shadow-sm shadow-cyan-950/40'
+              : 'bg-slate-900/50 hover:bg-slate-800 border-slate-800 text-slate-400'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5 text-cyan-400" />
+          <span>ROSTER ({rosterList.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('alerts')}
-          className={`py-1.5 px-2 rounded-lg flex items-center justify-center space-x-2 transition-all cursor-pointer border ${
+          className={`py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1.5 transition-all cursor-pointer border ${
             activeTab === 'alerts'
               ? 'bg-red-950/80 border-red-600 text-red-300 font-bold shadow-sm shadow-red-950/40'
               : 'bg-slate-900/50 hover:bg-slate-800 border-slate-800 text-slate-400'
@@ -127,14 +196,14 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
 
       {/* Content List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {activeTab === 'units' ? (
-          squadList.length === 0 ? (
+        {activeTab === 'live' ? (
+          /* Live Session View: ONLY currently active & transmitting forces */
+          liveSquadList.length === 0 ? (
             <div className="text-center py-12 text-slate-500 font-mono text-xs">
-              No active units in sector.
+              No field forces currently transmitting in live session.
             </div>
           ) : (
-            squadList.map((sq) => {
-              const isTransmitting = isSquadTransmitting(sq, user, squadList)
+            liveSquadList.map((sq) => {
               const isSelected = selectedSquad?.id === sq.id
 
               return (
@@ -149,24 +218,10 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2">
-                      <span
-                        className={`w-2.5 h-2.5 rounded-full ${
-                          isTransmitting
-                            ? 'bg-emerald-400 shadow-[0_0_8px_#10b981] animate-pulse'
-                            : 'bg-slate-500'
-                        }`}
-                      ></span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10b981] animate-pulse"></span>
                       <span className="font-bold text-white">{sq.name}</span>
                     </div>
-                    <span
-                      className={`text-[9px] px-1.5 py-0.5 rounded border font-semibold ${
-                        sq.role === 'SapperSquad'
-                          ? 'bg-amber-950/70 text-amber-300 border-amber-700'
-                          : 'bg-emerald-950/70 text-emerald-300 border-emerald-700'
-                      }`}
-                    >
-                      {sq.role === 'SapperSquad' ? 'SAPPER SQUAD' : 'TACTICAL SQUAD'}
-                    </span>
+                    {getRoleBadge(sq)}
                   </div>
 
                   <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
@@ -179,15 +234,76 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
                     <span className="text-slate-500">[{sq.area}]</span>
                   </div>
 
+                  <div className="mt-1.5 text-[10px] text-emerald-400 font-semibold flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 animate-pulse" />
+                    <span>LIVE SESSION ACTIVE (TRANSMITTING)</span>
+                  </div>
+                </div>
+              )
+            })
+          )
+        ) : activeTab === 'roster' ? (
+          /* Operational Roster View: Displays EVERYONE who is online (HQ, Forces, Radar) */
+          rosterList.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 font-mono text-xs">
+              No online units or headquarters registered.
+            </div>
+          ) : (
+            rosterList.map((sq) => {
+              const isTransmitting = isSquadTransmitting(sq, user, fieldSquadList)
+              const isHQ = isHQOrRadar(sq)
+              const isSelected = selectedSquad?.id === sq.id
+
+              return (
+                <div
+                  key={sq.id}
+                  onClick={() => setSelectedSquad(sq)}
+                  className={`p-3 rounded-lg border text-xs font-mono transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-950/40 border-cyan-500 text-white'
+                      : 'bg-slate-900/60 hover:bg-slate-850 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span
+                        className={`w-2.5 h-2.5 rounded-full ${
+                          isTransmitting
+                            ? 'bg-emerald-400 shadow-[0_0_8px_#10b981] animate-pulse'
+                            : isHQ
+                            ? 'bg-cyan-400 shadow-[0_0_6px_#06b6d4]'
+                            : 'bg-slate-500'
+                        }`}
+                      ></span>
+                      <span className="font-bold text-white">{sq.name}</span>
+                    </div>
+                    {getRoleBadge(sq)}
+                  </div>
+
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
+                    <div className="flex items-center space-x-1">
+                      <MapPin className="w-3 h-3 text-cyan-400" />
+                      <span className="text-cyan-300/90 font-mono">
+                        {sq.lat.toFixed(4)}, {sq.lon.toFixed(4)}
+                      </span>
+                    </div>
+                    <span className="text-slate-500">[{sq.area}]</span>
+                  </div>
+
                   {isTransmitting ? (
-                    <div className="mt-1 text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                      <Radio className="w-3 h-3 animate-pulse" />
+                    <div className="mt-1.5 text-[10px] text-emerald-400 font-semibold flex items-center gap-1.5">
+                      <Radio className="w-3.5 h-3.5 animate-pulse" />
                       <span>LIVE TRANSMITTING</span>
                     </div>
+                  ) : isHQ ? (
+                    <div className="mt-1.5 text-[10px] text-cyan-300 font-medium flex items-center gap-1.5">
+                      <Shield className="w-3 h-3 text-cyan-400" />
+                      <span>COMMAND POST (ONLINE)</span>
+                    </div>
                   ) : (
-                    <div className="mt-1 text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                    <div className="mt-1.5 text-[10px] text-slate-400 font-medium flex items-center gap-1.5">
                       <Clock className="w-3 h-3 text-slate-500" />
-                      <span>SIGNAL STANDBY (NO TELEMETRY)</span>
+                      <span>STANDBY (CONNECTED)</span>
                     </div>
                   )}
                 </div>
@@ -252,7 +368,9 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
         <div className="p-4 border-t border-slate-800 bg-slate-950/90 max-h-60 overflow-y-auto">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold font-mono text-white">
-              SOLDIER ROSTER ({selectedSquad.soldiers?.length || 0})
+              {isHQOrRadar(selectedSquad)
+                ? 'COMMAND FACILITY DETAILS'
+                : `SOLDIER ROSTER (${selectedSquad.soldiers?.length || 0})`}
             </span>
             {isMainAdmin && (
               <button
@@ -291,8 +409,10 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
                 </div>
               ))
             ) : (
-              <div className="text-slate-500 text-[11px]">
-                No attached soldier personnel (Center / Radar Unit).
+              <div className="text-slate-500 text-[11px] p-2 bg-slate-900/50 rounded border border-slate-800/80">
+                {isHQOrRadar(selectedSquad)
+                  ? `Fixed installation assigned to ${selectedSquad.area} Command Sector.`
+                  : 'No attached soldier personnel.'}
               </div>
             )}
           </div>

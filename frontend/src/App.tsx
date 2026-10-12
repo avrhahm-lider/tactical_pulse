@@ -26,7 +26,7 @@ export const App: React.FC = () => {
   } = useMapStore()
 
   const [isUnitDrawerOpen, setIsUnitDrawerOpen] = useState(false)
-  const [drawerInitialTab, setDrawerInitialTab] = useState<'units' | 'alerts'>('units')
+  const [drawerInitialTab, setDrawerInitialTab] = useState<'live' | 'roster' | 'alerts'>('roster')
 
   // Session rehydration on mount
   useEffect(() => {
@@ -74,7 +74,11 @@ export const App: React.FC = () => {
         onToggleUnitDrawer={() => setIsUnitDrawerOpen((prev) => !prev)}
         isUnitDrawerOpen={isUnitDrawerOpen}
         onOpenLiveUnitsList={() => {
-          setDrawerInitialTab('units')
+          setDrawerInitialTab('live')
+          setIsUnitDrawerOpen(true)
+        }}
+        onOpenRosterList={() => {
+          setDrawerInitialTab('roster')
           setIsUnitDrawerOpen(true)
         }}
         onOpenAlertsList={() => {

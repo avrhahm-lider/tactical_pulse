@@ -236,7 +236,6 @@ export const TacticalMap: React.FC = () => {
     setSelectedEntity,
     openAlertAtLocation,
     selectedZoneFilter,
-    setSelectedZoneFilter,
   } = useMapStore()
 
   const { user } = useAuthStore()
@@ -385,39 +384,6 @@ export const TacticalMap: React.FC = () => {
     }
   }, [relevantSignature, autoAdjustView])
 
-  // Check permission for sector navigation (Restricted by user role and assigned area)
-  const canNavigateToSector = useCallback(
-    (secKey: 'North' | 'Center' | 'South'): boolean => {
-      if (!user) return false
-      if (user.role === 'MainCommandCenter') return true
-      return user.area === secKey
-    },
-    [user]
-  )
-
-  // Navigate (fly camera) to specific area
-  const handleNavigateToSector = useCallback(
-    (secKey: 'North' | 'Center' | 'South') => {
-      const map = mapInstanceRef.current
-      if (!map) return
-
-      if (!canNavigateToSector(secKey)) {
-        alert(
-          `ACCESS RESTRICTED: Operational clearance is restricted to your assigned command sector (${user?.area?.toUpperCase() || 'assigned'}).`
-        )
-        return
-      }
-
-      const sec = SECTOR_DEFS[secKey]
-      map.flyToBounds(sec.bounds, { padding: [50, 50], maxZoom: 11, duration: 1.2 })
-
-      if (user?.role === 'MainCommandCenter') {
-        setSelectedZoneFilter(secKey)
-      }
-    },
-    [canNavigateToSector, user, setSelectedZoneFilter]
-  )
-
   // Render Operational Zones & Authorized Sector Visualizations
   useEffect(() => {
     const zonesLayer = zonesLayerRef.current
@@ -459,7 +425,7 @@ export const TacticalMap: React.FC = () => {
       })
       .addTo(zonesLayer)
 
-    // 2. Render Sector Polygons with Clickable Hover Labels (Restricted to authorized users)
+    // 2. Render Sector Boundary Polygons
     ;(Object.keys(SECTOR_DEFS) as Array<'North' | 'Center' | 'South'>).forEach((secKey) => {
       const sec = SECTOR_DEFS[secKey]
       const polygonCoords: [number, number][] = [
@@ -469,7 +435,6 @@ export const TacticalMap: React.FC = () => {
         [sec.minLat, sec.maxLon],
       ]
 
-      const isPermitted = canNavigateToSector(secKey)
       const isFocused = isManager && selectedZoneFilter === secKey
       const isAuthorized = isManager || authorizedArea === secKey
 
@@ -479,62 +444,7 @@ export const TacticalMap: React.FC = () => {
         fillColor: isAuthorized ? sec.color : '#000000',
         fillOpacity: isFocused ? 0.16 : isAuthorized ? 0.08 : 0.28,
         dashArray: isAuthorized ? undefined : '5, 5',
-        interactive: true,
-      })
-
-      // When hovering over an area, a label appears; clicking the label navigates to that area
-      const labelHtml = isPermitted
-        ? `<div class="tactical-sector-label-content">
-             <span class="sector-badge-permitted">📍 ${sec.name.toUpperCase()} COMMAND SECTOR</span>
-             <span class="sector-action-hint">CLICK TO NAVIGATE</span>
-           </div>`
-        : `<div class="tactical-sector-label-content forbidden">
-             <span class="sector-badge-forbidden">⛔ RESTRICTED SECTOR (${secKey.toUpperCase()})</span>
-             <span class="sector-action-hint">CLEARANCE RESTRICTED</span>
-           </div>`
-
-      poly.bindTooltip(labelHtml, {
-        sticky: true,
-        interactive: true,
-        direction: 'center',
-        className: `tactical-sector-tooltip ${
-          secKey === 'North'
-            ? 'tooltip-north'
-            : secKey === 'Center'
-            ? 'tooltip-center'
-            : 'tooltip-south'
-        } ${isPermitted ? 'is-permitted' : 'is-restricted'}`,
-      })
-
-      // Click on polygon area to navigate
-      poly.on('click', () => {
-        handleNavigateToSector(secKey)
-      })
-
-      // Ensure click on the tooltip label element itself also navigates
-      poly.on('tooltipopen', (e) => {
-        const tooltipEl = e.tooltip.getElement()
-        if (tooltipEl) {
-          tooltipEl.onclick = (ev: MouseEvent) => {
-            ev.stopPropagation()
-            handleNavigateToSector(secKey)
-          }
-        }
-      })
-
-      // Hover visual feedback
-      poly.on('mouseover', () => {
-        poly.setStyle({
-          fillOpacity: isPermitted ? 0.22 : 0.35,
-          weight: isPermitted ? 3 : 2,
-        })
-      })
-
-      poly.on('mouseout', () => {
-        poly.setStyle({
-          fillOpacity: isFocused ? 0.16 : isAuthorized ? 0.08 : 0.28,
-          weight: isFocused ? 3 : isAuthorized ? 2 : 1.2,
-        })
+        interactive: false,
       })
 
       poly.addTo(zonesLayer)
@@ -563,7 +473,7 @@ export const TacticalMap: React.FC = () => {
         })
         .addTo(zonesLayer)
     }
-  }, [user, selectedZoneFilter, squads, canNavigateToSector, handleNavigateToSector])
+  }, [user, selectedZoneFilter, squads])
 
   // Render Temporary Pin Placement Marker
   useEffect(() => {
