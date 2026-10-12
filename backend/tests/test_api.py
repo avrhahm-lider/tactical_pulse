@@ -3,12 +3,55 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from app.main import fastapi_app
 from app.db.seed import seed_database
+from sqlalchemy import delete, select, update
+from app.db.postgres import async_session_maker
+from app.models.map_entity import MapEntity
+from app.models.soldier import Soldier
+from app.models.threat import Threat
+from app.models.user import User
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_test_db():
-    # Ensure fresh seeded state before tests
+    # 1. Upsert default system seed users/soldiers safely without deleting user-created accounts
     await seed_database()
+
+    # 2. Clean up only temporary test records created during test runs
+    async with async_session_maker() as session:
+        test_usernames = [
+            "squad_test_eod",
+            "center_south_test",
+            "center_empty",
+            "squad_dup_internal",
+            "squad_dup_existing",
+        ]
+        test_soldier_ids = ["9999001", "9999002", "8888001", "7777001"]
+        test_threat_names = [
+            "Test Minefield",
+            "Operator Reported Hostile Drone",
+        ]
+
+        # Reset default demo threats to active / unassigned
+        await session.execute(
+            update(Threat)
+            .where(Threat.name.in_(["IED Blockade Route 4", "Hostile Recon Drone"]))
+            .values(engagement_status="unassigned", assigned_to_id=None, status="active")
+        )
+
+        # Remove test threats
+        await session.execute(delete(Threat).where(Threat.name.in_(test_threat_names)))
+
+        # Remove test users and their map entities
+        users_stmt = select(User).where(User.username.in_(test_usernames))
+        test_users = (await session.execute(users_stmt)).scalars().all()
+        for u in test_users:
+            await session.execute(delete(MapEntity).where(MapEntity.id == u.id))
+            await session.execute(delete(User).where(User.id == u.id))
+
+        # Remove test soldiers
+        await session.execute(delete(Soldier).where(Soldier.id.in_(test_soldier_ids)))
+
+        await session.commit()
 
 
 @pytest.mark.asyncio
