@@ -70,7 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center space-x-2">
               <span className="font-extrabold text-lg tracking-widest text-white">TACTICAL PULSE</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950 border border-cyan-600 text-cyan-400 font-mono">
-                C2 LIVE
+                LIVE OPS
               </span>
             </div>
           </div>

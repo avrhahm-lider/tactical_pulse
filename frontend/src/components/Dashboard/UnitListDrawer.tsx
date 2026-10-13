@@ -11,6 +11,8 @@ import {
   Flame,
   Users,
   Shield,
+  Building2,
+  Key,
 } from 'lucide-react'
 import { DroneIcon } from '../Common/DroneIcon'
 import { AddSoldierModal } from '../Forms/AddSoldierModal'
@@ -31,7 +33,14 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
   onClose,
   initialTab = 'roster',
 }) => {
-  const { squads, threats, removeSquad, setIsUserRegistrationModalOpen, setSelectedEntity } = useMapStore()
+  const {
+    squads,
+    threats,
+    removeSquad,
+    setIsUserRegistrationModalOpen,
+    setRegistrationModalTab,
+    setSelectedEntity,
+  } = useMapStore()
   const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState<'live' | 'roster' | 'alerts'>(initialTab)
   const [selectedSquad, setSelectedSquad] = useState<Squad | null>(null)
@@ -192,20 +201,39 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
         {activeTab === 'roster' && isMainAdmin && (
           <div className="flex items-center justify-between pb-1.5 px-1 border-b border-slate-800/60 mb-2">
             <span className="text-[10px] font-mono text-slate-400 uppercase">Manager Operations</span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
-                onClick={() => setIsAddSoldierModalOpen(true)}
+                onClick={() => {
+                  setRegistrationModalTab('soldier')
+                  setIsUserRegistrationModalOpen(true)
+                }}
                 className="px-2 py-0.5 rounded bg-cyan-950 hover:bg-cyan-900 border border-cyan-600 text-cyan-300 font-mono text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow"
+                title="Register Soldier"
               >
                 <UserPlus className="w-3 h-3" />
-                <span>+ ADD SOLDIER</span>
+                <span>+ SOLDIER</span>
               </button>
               <button
-                onClick={() => setIsUserRegistrationModalOpen(true)}
+                onClick={() => {
+                  setRegistrationModalTab('force')
+                  setIsUserRegistrationModalOpen(true)
+                }}
                 className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 font-mono text-[10px] flex items-center gap-1 cursor-pointer"
+                title="Register Force"
               >
-                <UserPlus className="w-3 h-3" />
-                <span>+ NEW FORCE</span>
+                <Building2 className="w-3 h-3" />
+                <span>+ FORCE</span>
+              </button>
+              <button
+                onClick={() => {
+                  setRegistrationModalTab('user')
+                  setIsUserRegistrationModalOpen(true)
+                }}
+                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-300 font-mono text-[10px] flex items-center gap-1 cursor-pointer"
+                title="Register User"
+              >
+                <Key className="w-3 h-3" />
+                <span>+ USER</span>
               </button>
             </div>
           </div>

@@ -62,7 +62,7 @@ export const LoginForm: React.FC = () => {
             <h1 className="text-2xl font-bold tracking-wider text-white flex items-center gap-2">
               TACTICAL PULSE
               <span className="text-xs px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-400 border border-cyan-700/60 font-mono">
-                C2
+                OPS
               </span>
             </h1>
             <p className="text-xs text-slate-400 font-mono tracking-tight">

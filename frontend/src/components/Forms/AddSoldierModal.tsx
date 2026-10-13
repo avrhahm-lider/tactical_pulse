@@ -1,7 +1,9 @@
 import React, { useState } from 'react'
-import { X, UserPlus, CheckCircle } from 'lucide-react'
+import { X, UserPlus, CheckCircle, Shield } from 'lucide-react'
 import { api } from '../../services/api'
 import { useMapStore } from '../../store/useMapStore'
+
+export type SoldierRoleOption = 'EOD' | 'Support/Non-combat' | 'Combat'
 
 interface AddSoldierModalProps {
   isOpen: boolean
@@ -14,34 +16,21 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
   onClose,
   initialSquadId = null,
 }) => {
-  const { squads, loadSnapshot } = useMapStore()
+  const { loadSnapshot } = useMapStore()
 
-  const [soldierId, setSoldierId] = useState('')
   const [name, setName] = useState('')
-  const [role, setRole] = useState<'rifleman' | 'sapper' | 'medic' | 'recon' | 'commander'>('rifleman')
-  const [targetSquadId, setTargetSquadId] = useState<string>(initialSquadId || '')
+  const [role, setRole] = useState<SoldierRoleOption>('Combat')
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   if (!isOpen) return null
 
-  const handleGenerateId = () => {
-    const randomId = Math.floor(1000000 + Math.random() * 9000000).toString()
-    setSoldierId(randomId)
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
     setSuccessMessage(null)
     setIsLoading(true)
-
-    if (!soldierId || soldierId.length !== 7 || !/^\d{7}$/.test(soldierId)) {
-      setErrorMessage('Soldier ID must be exactly 7 digits.')
-      setIsLoading(false)
-      return
-    }
 
     if (!name.trim()) {
       setErrorMessage('Soldier name is required.')
@@ -50,20 +39,19 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
     }
 
     try {
-      await api.admin.createSoldier({
-        id: soldierId,
+      const created = await api.admin.createSoldier({
         name: name.trim(),
         role,
-        squad_id: targetSquadId ? targetSquadId : null,
+        squad_id: initialSquadId || null,
       })
 
-      setSuccessMessage(`Soldier ${name} (ID: ${soldierId}) successfully added!`)
+      setSuccessMessage(`Soldier ${created.name} (${created.role}) successfully registered!`)
       await loadSnapshot()
 
       setTimeout(() => {
         setSuccessMessage(null)
-        setSoldierId('')
         setName('')
+        setRole('Combat')
         onClose()
       }, 1200)
     } catch (err: unknown) {
@@ -78,31 +66,27 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
     }
   }
 
-  const availableSquads = Object.values(squads).filter(
-    (s) => s.role === 'Squad' || s.role === 'SapperSquad'
-  )
-
   return (
-    <div className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-md hud-panel rounded-xl border border-cyan-800/80 shadow-2xl p-6 overflow-hidden">
+    <div className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div className="relative w-full max-w-md hud-panel rounded-xl border border-cyan-500/70 shadow-2xl p-6 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-700 text-cyan-400">
+            <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-500/60 text-cyan-400">
               <UserPlus className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base font-bold text-white font-mono tracking-wider">
-                REGISTER SOLDIER
+                ADD SOLDIER
               </h2>
               <p className="text-[11px] text-slate-400 font-mono">
-                MILITARY REGISTRY & SQUAD ASSIGNMENT
+                MILITARY REGISTRATION (3 REQUIRED FIELDS)
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -122,97 +106,62 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 font-mono">
-          {/* Soldier 7-digit ID */}
+          {/* Field 1: Name */}
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs text-slate-300 tracking-wider">
-                7-DIGIT MILITARY ID
-              </label>
-              <button
-                type="button"
-                onClick={handleGenerateId}
-                className="text-[10px] text-cyan-400 hover:underline cursor-pointer"
-              >
-                + GENERATE ID
-              </button>
-            </div>
-            <input
-              type="text"
-              required
-              maxLength={7}
-              placeholder="e.g. 5000001"
-              value={soldierId}
-              onChange={(e) => setSoldierId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-xs focus:border-cyan-500 focus:outline-none"
-            />
-          </div>
-
-          {/* Soldier Name */}
-          <div>
-            <label className="block text-xs text-slate-300 mb-1 tracking-wider">
-              FULL NAME
+            <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
+              1. Soldier Name
             </label>
             <input
               type="text"
               required
-              placeholder="e.g. Ronen Shani"
+              placeholder="e.g. David Cohen"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-xs focus:border-cyan-500 focus:outline-none"
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none"
             />
           </div>
 
-          {/* Role */}
+          {/* Field 2 & 3: Role (EOD, Support/Non-combat, Combat) */}
           <div>
-            <label className="block text-xs text-slate-300 mb-1 tracking-wider">
-              OPERATIONAL ROLE
+            <label className="block text-xs text-slate-300 mb-2 tracking-wider uppercase font-semibold">
+              2. Operational Role
             </label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
-            >
-              <option value="rifleman">Rifleman</option>
-              <option value="sapper">Sapper (EOD Specialist)</option>
-              <option value="medic">Field Medic</option>
-              <option value="recon">Recon Scout</option>
-              <option value="commander">Squad Commander</option>
-            </select>
-          </div>
-
-          {/* Squad Assignment */}
-          <div>
-            <label className="block text-xs text-slate-300 mb-1 tracking-wider">
-              SQUAD ATTACHMENT (OPTIONAL)
-            </label>
-            <select
-              value={targetSquadId}
-              onChange={(e) => setTargetSquadId(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
-            >
-              <option value="">General Registry (Unassigned)</option>
-              {availableSquads.map((sq) => (
-                <option key={sq.id} value={sq.id}>
-                  {sq.name} [{sq.role}]
-                </option>
+            <div className="grid grid-cols-3 gap-2">
+              {(['EOD', 'Support/Non-combat', 'Combat'] as SoldierRoleOption[]).map((r) => (
+                <button
+                  type="button"
+                  key={r}
+                  onClick={() => setRole(r)}
+                  className={`py-2.5 px-2 rounded-lg text-xs font-mono font-bold text-center border transition-all cursor-pointer ${
+                    role === r
+                      ? 'bg-cyan-950 text-cyan-300 border-cyan-400 shadow-[0_0_10px_rgba(0,229,255,0.25)]'
+                      : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-slate-700'
+                  }`}
+                >
+                  <div className="text-[11px] leading-tight">{r}</div>
+                </button>
               ))}
-            </select>
+            </div>
+            <p className="mt-1.5 text-[10px] text-slate-400">
+              Selected role: <span className="text-cyan-300 font-bold">{role}</span>
+            </p>
           </div>
 
-          <div className="pt-2 flex justify-end gap-2">
+          <div className="pt-3 flex justify-end gap-2 border-t border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isLoading}
-              className="px-4 py-1.5 rounded bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs shadow-lg transition-all cursor-pointer"
+              className="px-4 py-1.5 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs shadow-lg transition-all cursor-pointer flex items-center gap-1.5"
             >
-              {isLoading ? 'REGISTERING...' : 'REGISTER SOLDIER'}
+              <Shield className="w-3.5 h-3.5" />
+              <span>{isLoading ? 'REGISTERING...' : 'ADD SOLDIER'}</span>
             </button>
           </div>
         </form>

@@ -431,7 +431,7 @@ export const TacticalMap: React.FC = () => {
     const darkTiles = L.tileLayer(
       'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
       {
-        attribution: '&copy; Esri &mdash; Tactical C2',
+        attribution: '&copy; Esri &mdash; Tactical Operations',
         maxNativeZoom: 16,
         maxZoom: 20,
       }

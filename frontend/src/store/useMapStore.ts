@@ -31,6 +31,7 @@ interface MapState {
   dismissedDangerAlertIds: string[]
   isThreatModalOpen: boolean
   isUserRegistrationModalOpen: boolean
+  registrationModalTab: 'soldier' | 'force' | 'user'
   selectedZoneFilter: 'Global' | 'North' | 'Center' | 'South'
 
   loadSnapshot: () => Promise<void>
@@ -45,6 +46,7 @@ interface MapState {
   setPickedLocation: (loc: { lat: number; lon: number } | null) => void
   setIsThreatModalOpen: (isOpen: boolean) => void
   setIsUserRegistrationModalOpen: (isOpen: boolean) => void
+  setRegistrationModalTab: (tab: 'soldier' | 'force' | 'user') => void
   setSelectedZoneFilter: (zone: 'Global' | 'North' | 'Center' | 'South') => void
   openAlertAtLocation: (lat: number, lon: number) => void
   dismissAlert: (threatId: string) => void
@@ -64,6 +66,7 @@ export const useMapStore = create<MapState>((set, get) => ({
   dismissedDangerAlertIds: [],
   isThreatModalOpen: false,
   isUserRegistrationModalOpen: false,
+  registrationModalTab: 'soldier',
   selectedZoneFilter: 'Global',
 
   loadSnapshot: async () => {
@@ -283,6 +286,7 @@ export const useMapStore = create<MapState>((set, get) => ({
   setPickedLocation: (pickedLocation) => set({ pickedLocation }),
   setIsThreatModalOpen: (isThreatModalOpen) => set({ isThreatModalOpen }),
   setIsUserRegistrationModalOpen: (isUserRegistrationModalOpen) => set({ isUserRegistrationModalOpen }),
+  setRegistrationModalTab: (registrationModalTab) => set({ registrationModalTab }),
   setSelectedZoneFilter: (selectedZoneFilter) => set({ selectedZoneFilter }),
   openAlertAtLocation: (lat, lon) =>
     set({

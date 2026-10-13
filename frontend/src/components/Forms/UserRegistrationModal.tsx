@@ -3,346 +3,250 @@ import {
   X,
   UserPlus,
   Shield,
-  MapPin,
+  Radio,
+  Building2,
   Users,
-  Plus,
-  Trash2,
+  Key,
   CheckCircle,
+  AlertCircle,
+  Compass,
 } from 'lucide-react'
 import { api } from '../../services/api'
 import { useMapStore } from '../../store/useMapStore'
-import type { UserRole, Area, Soldier } from '../../types'
+import type { Soldier, Area } from '../../types'
 
-interface SoldierInput {
-  id: string
-  name: string
-  role: string
-}
+export type RegistrationTab = 'soldier' | 'force' | 'user'
+export type ForceTypeOption = 'Administrator' | 'Regional HQ' | 'Radar' | 'Field Force'
+export type UserTypeOption = 'Field Team' | 'Radar' | 'Regional HQ' | 'Administrator'
+export type SoldierRoleOption = 'EOD' | 'Support/Non-combat' | 'Combat'
 
 interface UserRegistrationModalProps {
   isOpen: boolean
   onClose: () => void
 }
 
-const REGIONAL_HQ_PRESETS = [
-  {
-    name: 'Northern Command Center',
-    username: 'command_north',
-    area: 'North' as Area,
-    lat: '33.0000',
-    lon: '35.3000',
-    description: 'Regional HQ Northern Sector (Safed / Upper Galilee)',
-  },
-  {
-    name: 'Central Command Center',
-    username: 'command_center',
-    area: 'Center' as Area,
-    lat: '32.1000',
-    lon: '34.8000',
-    description: 'Regional HQ Central Sector (Tel Aviv / Kirya Command)',
-  },
-  {
-    name: 'Southern Command Center',
-    username: 'command_south',
-    area: 'South' as Area,
-    lat: '31.2000',
-    lon: '34.7000',
-    description: 'Regional HQ Southern Sector (Beer Sheva Command)',
-  },
-]
-
 export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { loadSnapshot } = useMapStore()
+  const {
+    loadSnapshot,
+    registrationModalTab,
+    setRegistrationModalTab,
+  } = useMapStore()
 
-  const [role, setRole] = useState<UserRole>('AreaCommandCenter')
-  const [name, setName] = useState('Northern Command Center')
-  const [username, setUsername] = useState('command_north')
-  const [password, setPassword] = useState('command123')
-  const [area, setArea] = useState<Area>('North')
-  const [lat, setLat] = useState('33.0000')
-  const [lon, setLon] = useState('35.3000')
-  const [description, setDescription] = useState('Regional HQ Northern Sector')
-  const [soldiers, setSoldiers] = useState<SoldierInput[]>([])
-  const [commanderSoldierId, setCommanderSoldierId] = useState('2000002')
-  const [commanderSoldierName, setCommanderSoldierName] = useState('Maj. Dan Alon')
-  const [commanderSoldierRole, setCommanderSoldierRole] = useState('commander')
+  // Active Tab
+  const [activeTab, setActiveTab] = useState<RegistrationTab>('soldier')
 
-  // Unassigned soldiers in military registry
-  const [unassignedSoldiers, setUnassignedSoldiers] = useState<Soldier[]>([])
-  const [selectedUnassignedSoldierIds, setSelectedUnassignedSoldierIds] = useState<string[]>([])
-  const [isLoadingUnassigned, setIsLoadingUnassigned] = useState(false)
-
+  // Status feedback
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
-  // Fetch unassigned soldiers when modal opens
+  // -------------------------------------------------------------
+  // TAB 1: ADD SOLDIER (3 fields: Name, Role [EOD, Support/Non-combat, Combat])
+  // -------------------------------------------------------------
+  const [soldierName, setSoldierName] = useState('')
+  const [soldierRole, setSoldierRole] = useState<SoldierRoleOption>('Combat')
+
+  // -------------------------------------------------------------
+  // TAB 2: ADD FORCE (4 options: Administrator, Regional HQ, Radar, Field Force)
+  // Each requires: name, description. Regional HQ also requires: area/region.
+  // -------------------------------------------------------------
+  const [forceType, setForceType] = useState<ForceTypeOption>('Field Force')
+  const [forceName, setForceName] = useState('')
+  const [forceDescription, setForceDescription] = useState('')
+  const [forceRegion, setForceRegion] = useState<Area>('Center')
+
+  // -------------------------------------------------------------
+  // TAB 3: ADD USER (Username, Password, User Type)
+  // "Field Team" and "Radar" created without soldier link.
+  // Others must be linked to a soldier from dropdown (unlinked only).
+  // -------------------------------------------------------------
+  const [userType, setUserType] = useState<UserTypeOption>('Field Team')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [selectedSoldierId, setSelectedSoldierId] = useState<string>('')
+  const [userRegion, setUserRegion] = useState<Area>('Center')
+
+  // Available (Unlinked) Soldiers for Tab 3
+  const [unlinkedSoldiers, setUnlinkedSoldiers] = useState<Soldier[]>([])
+  const [isLoadingSoldiers, setIsLoadingSoldiers] = useState(false)
+
+  // Sync tab with store when modal opens
   useEffect(() => {
     if (isOpen) {
-      setIsLoadingUnassigned(true)
-      api.admin
-        .getUnassignedSoldiers()
-        .then((list) => {
-          setUnassignedSoldiers(list || [])
-        })
-        .catch((err) => {
-          console.error('Failed to load unassigned soldiers:', err)
-        })
-        .finally(() => {
-          setIsLoadingUnassigned(false)
-        })
-    }
-  }, [isOpen])
-
-  // Reactively update username when name/HQ changes
-  const handleNameChange = (newName: string) => {
-    setName(newName)
-
-    if (role === 'AreaCommandCenter') {
-      const lower = newName.toLowerCase()
-      if (lower.includes('north') || lower.includes('צפון')) {
-        setUsername('command_north')
-        setArea('North')
-        setLat('33.0000')
-        setLon('35.3000')
-        setCommanderSoldierId('2000002')
-        setCommanderSoldierName('Maj. Dan Alon')
-      } else if (lower.includes('center') || lower.includes('central') || lower.includes('מרכז')) {
-        setUsername('command_center')
-        setArea('Center')
-        setLat('32.1000')
-        setLon('34.8000')
-        setCommanderSoldierId('2000003')
-        setCommanderSoldierName('Col. Ronen Bar')
-      } else if (lower.includes('south') || lower.includes('דרום')) {
-        setUsername('command_south')
-        setArea('South')
-        setLat('31.2000')
-        setLon('34.7000')
-        setCommanderSoldierId('2000004')
-        setCommanderSoldierName('Lt. Col. Avi Cohen')
-      } else {
-        const slug = newName
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, '_')
-          .replace(/^_+|_+$/g, '')
-        setUsername(`command_${slug || 'regional'}`)
+      if (registrationModalTab) {
+        setActiveTab(registrationModalTab)
       }
-    } else {
-      const slug = newName
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '_')
-        .replace(/^_+|_+$/g, '')
-      if (role === 'Squad' || role === 'SapperSquad') {
-        setUsername(`squad_${slug || 'unit'}`)
-      } else if (role === 'Radar') {
-        setUsername(`radar_${slug || 'post'}`)
+      setErrorMessage(null)
+      setSuccessMessage(null)
+      fetchUnlinkedSoldiers()
+    }
+  }, [isOpen, registrationModalTab])
+
+  // Fetch unlinked soldiers
+  const fetchUnlinkedSoldiers = async () => {
+    setIsLoadingSoldiers(true)
+    try {
+      const soldiers = await api.admin.getUnlinkedSoldiers()
+      setUnlinkedSoldiers(soldiers || [])
+      if (soldiers && soldiers.length > 0 && !selectedSoldierId) {
+        setSelectedSoldierId(soldiers[0].id)
       }
+    } catch (err) {
+      console.error('Failed to load unlinked soldiers:', err)
+    } finally {
+      setIsLoadingSoldiers(false)
     }
   }
 
-  // Handle preset HQ selection
-  const handleSelectHQPreset = (preset: (typeof REGIONAL_HQ_PRESETS)[number]) => {
-    setName(preset.name)
-    setUsername(preset.username)
-    setArea(preset.area)
-    setLat(preset.lat)
-    setLon(preset.lon)
-    setDescription(preset.description)
-    if (preset.area === 'North') {
-      setCommanderSoldierId('2000002')
-      setCommanderSoldierName('Maj. Dan Alon')
-    } else if (preset.area === 'Center') {
-      setCommanderSoldierId('2000003')
-      setCommanderSoldierName('Col. Ronen Bar')
-    } else if (preset.area === 'South') {
-      setCommanderSoldierId('2000004')
-      setCommanderSoldierName('Lt. Col. Avi Cohen')
+  if (!isOpen) return null
+
+  // Switch tabs handler
+  const handleTabChange = (tab: RegistrationTab) => {
+    setActiveTab(tab)
+    setRegistrationModalTab(tab)
+    setErrorMessage(null)
+    setSuccessMessage(null)
+    if (tab === 'user') {
+      fetchUnlinkedSoldiers()
     }
   }
 
-  // Role changes
-  const handleRoleChange = (newRole: UserRole) => {
-    setRole(newRole)
-    setSelectedUnassignedSoldierIds([])
-    if (newRole === 'AreaCommandCenter') {
-      handleSelectHQPreset(REGIONAL_HQ_PRESETS[0])
-    } else if (newRole === 'Squad') {
-      setName('Golani Bravo Patrol')
-      setUsername('squad_golani_bravo')
-      setPassword('squad123')
-      setLat('32.0850')
-      setLon('34.7820')
-      setDescription('Tactical assault reconnaissance team')
-      setSoldiers([
-        { id: '3000001', name: 'Itamar Ron', role: 'rifleman' },
-        { id: '3000002', name: 'Ori Golan', role: 'medic' },
-      ])
-    } else if (newRole === 'SapperSquad') {
-      setName('Combat Engineering EOD Unit')
-      setUsername('squad_eod_special')
-      setPassword('squad123')
-      setLat('32.0910')
-      setLon('34.7880')
-      setDescription('Explosive ordnance neutralization squad')
-      setSoldiers([
-        { id: '3000003', name: 'Gil Shavit', role: 'sapper' },
-        { id: '3000004', name: 'Erez Tal', role: 'sapper' },
-      ])
-    } else if (newRole === 'Radar') {
-      setName('Galilee Surveillance Radar 2')
-      setUsername('radar_galilee_2')
-      setPassword('radar123')
-      setLat('33.1000')
-      setLon('35.4000')
-      setDescription('Northern airspace and UAV monitoring radar post')
-      setSoldiers([])
-    } else if (newRole === 'MainCommandCenter') {
-      setName('General Staff Command Center')
-      setUsername('hq_supreme_2')
-      setPassword('admin123')
-      setArea('Global')
-      setLat('32.0750')
-      setLon('34.7920')
-      setDescription('Supreme Tactical Operations Headquarters')
-      setSoldiers([])
-      setCommanderSoldierId('1000002')
-      setCommanderSoldierName('Brig. Gen. Yair Golan')
-      setCommanderSoldierRole('commander')
-    }
-  }
+  // -------------------------------------------------------------
+  // SUBMIT HANDLERS
+  // -------------------------------------------------------------
 
-  const handleAddSoldier = () => {
-    const nextId = (Math.floor(1000000 + Math.random() * 9000000)).toString()
-    setSoldiers([...soldiers, { id: nextId, name: '', role: 'rifleman' }])
-  }
-
-  const handleRemoveSoldier = (index: number) => {
-    setSoldiers(soldiers.filter((_, idx) => idx !== index))
-  }
-
-  const handleUpdateSoldier = (index: number, field: keyof SoldierInput, val: string) => {
-    const updated = [...soldiers]
-    updated[index] = { ...updated[index], [field]: val }
-    setSoldiers(updated)
-  }
-
-  const toggleUnassignedSoldier = (sId: string) => {
-    setSelectedUnassignedSoldierIds((prev) =>
-      prev.includes(sId) ? prev.filter((id) => id !== sId) : [...prev, sId]
-    )
-  }
-
-  const isCommandCenterRole = role === 'MainCommandCenter' || role === 'AreaCommandCenter'
-  const isSquadRole = role === 'Squad' || role === 'SapperSquad'
-
-  // Verification if commander details are validly specified
-  const hasValidCommander = Boolean(
-    commanderSoldierId.trim() &&
-    commanderSoldierName.trim() &&
-    /^\d{7}$/.test(commanderSoldierId.trim())
-  )
-
-  // Total soldiers attached to this unit (selected unassigned + added roster + commander)
-  const totalAssignedSoldiers =
-    selectedUnassignedSoldierIds.length +
-    soldiers.length +
-    (isCommandCenterRole && hasValidCommander ? 1 : 0)
-
-  // Strict soldier validation: Command Centers require >= 1 soldier; Squads require >= 2 soldiers
-  const isSoldierRequirementMet = isCommandCenterRole
-    ? totalAssignedSoldiers >= 1
-    : isSquadRole
-    ? totalAssignedSoldiers >= 2
-    : true
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  // 1. Submit Add Soldier
+  const handleSubmitSoldier = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
     setSuccessMessage(null)
+
+    if (!soldierName.trim()) {
+      setErrorMessage('Soldier name is required.')
+      return
+    }
+
     setIsLoading(true)
-
     try {
-      const parsedLat = parseFloat(lat)
-      const parsedLon = parseFloat(lon)
+      const newSoldier = await api.admin.createSoldier({
+        name: soldierName.trim(),
+        role: soldierRole,
+      })
 
-      if (isNaN(parsedLat) || isNaN(parsedLon)) {
-        setErrorMessage('Coordinates must be valid numbers.')
-        setIsLoading(false)
-        return
+      setSuccessMessage(`Soldier ${newSoldier.name} (${newSoldier.role}) successfully registered!`)
+      setSoldierName('')
+      setSoldierRole('Combat')
+      await loadSnapshot()
+      await fetchUnlinkedSoldiers()
+
+      setTimeout(() => {
+        setSuccessMessage(null)
+      }, 3000)
+    } catch (err: unknown) {
+      let msg = 'Failed to register soldier.'
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { error?: { message?: string } } } }
+        msg = axiosErr.response?.data?.error?.message || msg
       }
+      setErrorMessage(msg)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
-      // 1. Manager / Regional HQ requires assigning at least one soldier
-      let assignedSoldierId: string | undefined = undefined
-      if (isCommandCenterRole) {
-        if (totalAssignedSoldiers < 1) {
-          setErrorMessage('At least one soldier is required when registering a command center.')
-          setIsLoading(false)
-          return
-        }
+  // 2. Submit Add Force
+  const handleSubmitForce = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErrorMessage(null)
+    setSuccessMessage(null)
 
-        // If commander details are provided, register/ensure commander in registry
-        if (hasValidCommander) {
-          try {
-            await api.admin.createSoldier({
-              id: commanderSoldierId.trim(),
-              name: commanderSoldierName.trim(),
-              role: commanderSoldierRole || 'commander',
-            })
-          } catch (soldierErr: unknown) {
-            const axiosErr = soldierErr as { response?: { status?: number } }
-            if (axiosErr.response?.status !== 409) {
-              throw soldierErr
-            }
-          }
-          assignedSoldierId = commanderSoldierId.trim()
-        }
-      }
+    if (!forceName.trim()) {
+      setErrorMessage('Force name is required.')
+      return
+    }
+    if (!forceDescription.trim()) {
+      setErrorMessage('Force description is required.')
+      return
+    }
 
-      // 2. Creating a team requires adding multiple soldiers (>= 2)
-      if (isSquadRole) {
-        if (totalAssignedSoldiers < 2) {
-          setErrorMessage('Creating a tactical team requires adding multiple soldiers (minimum 2 soldiers).')
-          setIsLoading(false)
-          return
+    setIsLoading(true)
+    try {
+      // Slugify name for credentials
+      const slug = forceName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '_')
+        .replace(/^_+|_+$/g, '')
+      const uniqueSuffix = Math.floor(100 + Math.random() * 900)
+      const generatedUsername = `${slug || 'force'}_${uniqueSuffix}`
+      const generatedPassword = 'force' + uniqueSuffix
+
+      let backendRole: 'MainCommandCenter' | 'AreaCommandCenter' | 'Radar' | 'Squad' = 'Squad'
+      let backendArea: Area = 'Center'
+      let defaultLat = 32.0853
+      let defaultLon = 34.7818
+
+      if (forceType === 'Administrator') {
+        backendRole = 'MainCommandCenter'
+        backendArea = 'Global'
+        defaultLat = 32.0750
+        defaultLon = 34.7920
+      } else if (forceType === 'Regional HQ') {
+        backendRole = 'AreaCommandCenter'
+        backendArea = forceRegion
+        if (forceRegion === 'North') {
+          defaultLat = 33.0000
+          defaultLon = 35.3000
+        } else if (forceRegion === 'South') {
+          defaultLat = 31.2000
+          defaultLon = 34.7000
+        } else {
+          defaultLat = 32.1000
+          defaultLon = 34.8000
         }
-        for (const s of soldiers) {
-          if (!s.name.trim() || s.id.length !== 7 || !/^\d{7}$/.test(s.id)) {
-            setErrorMessage(`Soldier '${s.name || 'unnamed'}' requires a name and exactly 7-digit ID.`)
-            setIsLoading(false)
-            return
-          }
-        }
+      } else if (forceType === 'Radar') {
+        backendRole = 'Radar'
+        backendArea = 'North'
+        defaultLat = 33.1000
+        defaultLon = 35.4000
+      } else {
+        // Field Force
+        backendRole = 'Squad'
+        backendArea = 'Center'
+        defaultLat = 32.0853
+        defaultLon = 34.7818
       }
 
       const payload: Record<string, unknown> = {
-        username,
-        password,
-        role,
-        area: role === 'MainCommandCenter' ? 'Global' : area,
-        name,
-        description,
-        lat: parsedLat,
-        lon: parsedLon,
-        soldiers: soldiers.length > 0 ? soldiers.map((s) => ({ id: s.id, name: s.name, role: s.role })) : undefined,
-        soldier_ids: selectedUnassignedSoldierIds.length > 0 ? selectedUnassignedSoldierIds : undefined,
+        name: forceName.trim(),
+        description: forceDescription.trim(),
+        username: generatedUsername,
+        password: generatedPassword,
+        role: backendRole,
+        area: backendArea,
+        lat: defaultLat,
+        lon: defaultLon,
       }
 
-      if (assignedSoldierId) {
-        payload.soldier_id = assignedSoldierId
+      // If command center requires a soldier in the existing backend, attach first available or mock
+      if (backendRole === 'MainCommandCenter' || backendRole === 'AreaCommandCenter') {
+        if (unlinkedSoldiers.length > 0) {
+          payload.soldier_id = unlinkedSoldiers[0].id
+        }
       }
 
       await api.admin.createUser(payload)
 
-      setSuccessMessage(`Force '${name}' (${username}) successfully registered!`)
+      setSuccessMessage(`Force '${forceName}' (${forceType}) successfully added!`)
+      setForceName('')
+      setForceDescription('')
       await loadSnapshot()
 
       setTimeout(() => {
-        onClose()
-      }, 1200)
+        setSuccessMessage(null)
+      }, 3000)
     } catch (err: unknown) {
       let msg = 'Failed to register force.'
       if (err && typeof err === 'object' && 'response' in err) {
@@ -355,23 +259,128 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     }
   }
 
-  if (!isOpen) return null
+  // 3. Submit Add User
+  const handleSubmitUser = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErrorMessage(null)
+    setSuccessMessage(null)
+
+    if (!username.trim() || username.trim().length < 3) {
+      setErrorMessage('Username must be at least 3 characters long.')
+      return
+    }
+    if (!password || password.length < 6) {
+      setErrorMessage('Password must be at least 6 characters long.')
+      return
+    }
+
+    const requiresSoldier = userType !== 'Field Team' && userType !== 'Radar'
+
+    if (requiresSoldier && !selectedSoldierId) {
+      setErrorMessage('This user type must be linked to a soldier selected from the dropdown list.')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      let backendRole: 'MainCommandCenter' | 'AreaCommandCenter' | 'Radar' | 'Squad' = 'Squad'
+      let backendArea: Area = 'Center'
+      let displayName = username.trim()
+      let defaultLat = 32.0853
+      let defaultLon = 34.7818
+
+      const linkedSoldier = unlinkedSoldiers.find((s) => s.id === selectedSoldierId)
+
+      if (userType === 'Administrator') {
+        backendRole = 'MainCommandCenter'
+        backendArea = 'Global'
+        displayName = linkedSoldier ? `${linkedSoldier.name} (Admin)` : username.trim()
+        defaultLat = 32.0750
+        defaultLon = 34.7920
+      } else if (userType === 'Regional HQ') {
+        backendRole = 'AreaCommandCenter'
+        backendArea = userRegion
+        displayName = linkedSoldier ? `${linkedSoldier.name} (${userRegion} HQ)` : username.trim()
+        if (userRegion === 'North') {
+          defaultLat = 33.0000
+          defaultLon = 35.3000
+        } else if (userRegion === 'South') {
+          defaultLat = 31.2000
+          defaultLon = 34.7000
+        } else {
+          defaultLat = 32.1000
+          defaultLon = 34.8000
+        }
+      } else if (userType === 'Radar') {
+        backendRole = 'Radar'
+        backendArea = 'North'
+        displayName = `Radar Station - ${username.trim()}`
+        defaultLat = 33.1000
+        defaultLon = 35.4000
+      } else {
+        // Field Team
+        backendRole = 'Squad'
+        backendArea = 'Center'
+        displayName = `Field Team - ${username.trim()}`
+        defaultLat = 32.0853
+        defaultLon = 34.7818
+      }
+
+      const payload: Record<string, unknown> = {
+        username: username.trim(),
+        password,
+        role: backendRole,
+        area: backendArea,
+        name: displayName,
+        description: `Operational account for ${userType}`,
+        lat: defaultLat,
+        lon: defaultLon,
+      }
+
+      // Only link soldier if not Field Team or Radar
+      if (requiresSoldier && selectedSoldierId) {
+        payload.soldier_id = selectedSoldierId
+      }
+
+      await api.admin.createUser(payload)
+
+      setSuccessMessage(`User account '${username.trim()}' (${userType}) successfully created!`)
+      setUsername('')
+      setPassword('')
+      setSelectedSoldierId('')
+      await loadSnapshot()
+      await fetchUnlinkedSoldiers()
+
+      setTimeout(() => {
+        setSuccessMessage(null)
+      }, 3000)
+    } catch (err: unknown) {
+      let msg = 'Failed to create user.'
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { error?: { message?: string } } } }
+        msg = axiosErr.response?.data?.error?.message || msg
+      }
+      setErrorMessage(msg)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="relative w-full max-w-2xl hud-panel rounded-xl border border-cyan-500/60 shadow-2xl p-6 overflow-hidden max-h-[90vh] flex flex-col">
-        {/* Top Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800 shrink-0">
+      <div className="relative w-full max-w-xl hud-panel rounded-xl border border-cyan-500/70 shadow-2xl p-6 overflow-hidden max-h-[92vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
           <div className="flex items-center space-x-3">
-            <div className="p-2.5 rounded-lg bg-cyan-950 border border-cyan-500/60 text-cyan-400">
+            <div className="p-2 rounded-lg bg-cyan-950 border border-cyan-500/60 text-cyan-400">
               <UserPlus className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white font-mono tracking-wider flex items-center gap-2">
-                FORCE &amp; HEADQUARTERS REGISTRATION
+              <h2 className="text-base font-bold text-white font-mono tracking-wider">
+                REGISTRATION PANEL
               </h2>
               <p className="text-[11px] text-slate-400 font-mono">
-                REGISTER REGIONAL COMMAND HEADQUARTERS OR TACTICAL FORCES
+                MILITARY REGISTRY, FORCES & USER ACCESS
               </p>
             </div>
           </div>
@@ -383,416 +392,393 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
           </button>
         </div>
 
+        {/* Tab Navigation */}
+        <div className="flex border-b border-slate-800 mt-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => handleTabChange('soldier')}
+            className={`flex-1 py-2.5 text-xs font-mono font-bold flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'soldier'
+                ? 'border-cyan-400 text-cyan-300 bg-cyan-950/40'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
+            }`}
+          >
+            <Shield className="w-4 h-4" />
+            <span>ADD SOLDIER</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange('force')}
+            className={`flex-1 py-2.5 text-xs font-mono font-bold flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'force'
+                ? 'border-cyan-400 text-cyan-300 bg-cyan-950/40'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>ADD FORCE</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange('user')}
+            className={`flex-1 py-2.5 text-xs font-mono font-bold flex items-center justify-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'user'
+                ? 'border-cyan-400 text-cyan-300 bg-cyan-950/40'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40'
+            }`}
+          >
+            <Key className="w-4 h-4" />
+            <span>ADD USER</span>
+          </button>
+        </div>
+
+        {/* Status Alerts */}
         {errorMessage && (
-          <div className="mt-3 p-3 rounded-lg bg-red-950/80 border border-red-700 text-red-200 text-xs font-mono shrink-0">
-            {errorMessage}
+          <div className="mt-3 p-3 rounded-lg bg-red-950/80 border border-red-700 text-red-200 text-xs font-mono flex items-start gap-2 shrink-0">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
         {successMessage && (
           <div className="mt-3 p-3 rounded-lg bg-emerald-950/80 border border-emerald-600 text-emerald-200 text-xs font-mono flex items-center gap-2 shrink-0">
-            <CheckCircle className="w-4 h-4 text-emerald-400" />
+            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{successMessage}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-4 space-y-4 overflow-y-auto pr-1 flex-1">
-          {/* Role / Force Type Selection */}
-          <div>
-            <label className="block text-xs font-mono text-cyan-400 mb-1.5 font-bold uppercase tracking-wider">
-              Force Type / Operational Role
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {[
-                { r: 'AreaCommandCenter' as UserRole, label: 'Regional HQ', color: 'border-purple-500' },
-                { r: 'Squad' as UserRole, label: 'Tactical Squad', color: 'border-emerald-500' },
-                { r: 'SapperSquad' as UserRole, label: 'EOD Sapper Squad', color: 'border-amber-500' },
-                { r: 'Radar' as UserRole, label: 'Radar Post', color: 'border-cyan-500' },
-                { r: 'MainCommandCenter' as UserRole, label: 'Supreme Command', color: 'border-indigo-500' },
-              ].map(({ r, label }) => (
-                <button
-                  type="button"
-                  key={r}
-                  onClick={() => handleRoleChange(r)}
-                  className={`py-2 px-3 rounded-lg text-xs font-mono font-semibold text-center border transition-all cursor-pointer ${
-                    role === r
-                      ? 'bg-cyan-950/90 text-white border-cyan-400 shadow-[0_0_10px_rgba(0,229,255,0.3)]'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Regional HQ Quick Preset Selector */}
-          {role === 'AreaCommandCenter' && (
-            <div className="p-3 rounded-lg bg-purple-950/40 border border-purple-800/80 space-y-2">
-              <span className="text-[11px] font-mono font-bold text-purple-300 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5" />
-                REGIONAL COMMAND HEADQUARTERS PRESET:
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {REGIONAL_HQ_PRESETS.map((p) => (
-                  <button
-                    type="button"
-                    key={p.username}
-                    onClick={() => handleSelectHQPreset(p)}
-                    className={`p-2 rounded border text-left text-[11px] font-mono transition-all cursor-pointer ${
-                      username === p.username
-                        ? 'bg-purple-900/90 border-purple-400 text-white font-bold'
-                        : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    <div className="text-white font-semibold">{p.name}</div>
-                    <div className="text-[10px] text-purple-300">Call-sign: {p.username}</div>
-                  </button>
-                ))}
+        {/* Tab Contents */}
+        <div className="mt-4 overflow-y-auto pr-1 flex-1 font-mono">
+          {/* ========================================================= */}
+          {/* TAB 1: ADD SOLDIER (3 Fields: Name, Role [EOD, Support/Non-combat, Combat]) */}
+          {/* ========================================================= */}
+          {activeTab === 'soldier' && (
+            <form onSubmit={handleSubmitSoldier} className="space-y-4">
+              <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800 text-[11px] text-slate-400">
+                Register a new military personnel into the central defense registry.
               </div>
-            </div>
-          )}
 
-          {/* Force Name & Auto-updating Username */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase">
-                Specific Force / HQ Name
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                placeholder="e.g. Northern Command Center"
-                className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase">
-                Call-sign / Username (Auto-Updated)
-              </label>
-              <input
-                type="text"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. command_north"
-                className="w-full px-3 py-2 bg-slate-950/80 border border-slate-700 rounded-lg text-cyan-300 font-mono text-sm focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          {/* Password & Sector */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase">
-                Access Key / Password
-              </label>
-              <input
-                type="text"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase">
-                Operational Sector
-              </label>
-              <select
-                value={area}
-                onChange={(e) => setArea(e.target.value as Area)}
-                className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-cyan-500 cursor-pointer"
-              >
-                <option value="North">North (Lat ≥ 32.70)</option>
-                <option value="Center">Center (31.90 ≤ Lat &lt; 32.70)</option>
-                <option value="South">South (Lat &lt; 31.90)</option>
-                {role === 'MainCommandCenter' && <option value="Global">Global (All Sectors)</option>}
-              </select>
-            </div>
-          </div>
-
-          {/* Coordinates */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                Latitude
-              </label>
-              <input
-                type="text"
-                required
-                value={lat}
-                onChange={(e) => setLat(e.target.value)}
-                placeholder="32.0853"
-                className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-cyan-400" />
-                Longitude
-              </label>
-              <input
-                type="text"
-                required
-                value={lon}
-                onChange={(e) => setLon(e.target.value)}
-                placeholder="34.7818"
-                className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-xs font-mono text-slate-300 mb-1 tracking-wider uppercase">
-              Operational Description
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Operational sector assignment and unit capability"
-              className="w-full px-3 py-2 bg-slate-900/80 border border-slate-700 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          {/* Unassigned Soldier Picker (Available for Command Centers & Field Squads) */}
-          <div className="p-3.5 rounded-lg bg-slate-900/90 border border-slate-700/80 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Users className="w-4 h-4 text-cyan-400" />
-                <span className="text-xs font-mono font-bold text-white tracking-wider">
-                  ASSIGN UNASSIGNED SOLDIERS ({selectedUnassignedSoldierIds.length} SELECTED)
-                </span>
+              {/* Field 1: Name */}
+              <div>
+                <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
+                  1. Soldier Full Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. David Cohen"
+                  value={soldierName}
+                  onChange={(e) => setSoldierName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none"
+                />
               </div>
-              {isLoadingUnassigned ? (
-                <span className="text-[10px] text-slate-400 font-mono animate-pulse">Loading registry...</span>
-              ) : (
-                <span className="text-[10px] text-cyan-300 font-mono bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
-                  {unassignedSoldiers.length} Available in Database
-                </span>
-              )}
-            </div>
 
-            <p className="text-[11px] text-slate-300 font-mono">
-              Select existing unassigned soldiers from the registry to attach to this unit:
-            </p>
-
-            {unassignedSoldiers.length === 0 ? (
-              <div className="p-2.5 rounded bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 font-mono">
-                No unassigned soldiers currently available. You can add new soldiers to the roster below.
-              </div>
-            ) : (
-              <div className="max-h-36 overflow-y-auto space-y-1.5 p-1 bg-slate-950/80 rounded border border-slate-800">
-                {unassignedSoldiers.map((soldier) => {
-                  const isSelected = selectedUnassignedSoldierIds.includes(soldier.id)
-                  return (
-                    <div
-                      key={soldier.id}
-                      onClick={() => toggleUnassignedSoldier(soldier.id)}
-                      className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors border font-mono text-xs ${
-                        isSelected
-                          ? 'bg-cyan-950/90 border-cyan-500 text-cyan-200'
-                          : 'bg-slate-900/50 hover:bg-slate-800 border-slate-800 text-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2.5">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => {}}
-                          className="rounded border-slate-700 text-cyan-500 focus:ring-0 cursor-pointer"
-                        />
-                        <span className="font-bold text-white">{soldier.name}</span>
-                        <span className="text-slate-400 font-mono text-[10px]">[ID: {soldier.id}]</span>
-                      </div>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-amber-300 uppercase">
-                        {soldier.role}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Appointed Commanding Officer (Soldier Assignment - Required for HQ / Manager) */}
-          {(role === 'MainCommandCenter' || role === 'AreaCommandCenter') && (
-            <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-700/80 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Shield className="w-4 h-4 text-indigo-400" />
-                  <span className="text-xs font-mono font-bold text-white tracking-wider">
-                    APPOINTED COMMANDING OFFICER (SOLDIER ASSIGNMENT - OPTIONAL IF SOLDIERS ASSIGNED)
-                  </span>
-                </div>
-                <span className="text-[10px] text-indigo-300 font-mono font-semibold px-2 py-0.5 rounded bg-indigo-900/60 border border-indigo-600">
-                  {selectedUnassignedSoldierIds.length > 0 || soldiers.length > 0 ? 'OPTIONAL' : 'MANDATORY'}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-300 font-mono">
-                Command headquarters must be commanded by an appointed officer with a verified 7-digit military ID.
-              </p>
-              <div className="grid grid-cols-12 gap-3">
-                <div className="col-span-4">
-                  <label className="block text-[10px] font-mono text-indigo-300 mb-1 uppercase">
-                    Soldier Military ID (7 Digits)
-                  </label>
-                  <input
-                    type="text"
-                    value={commanderSoldierId}
-                    onChange={(e) => setCommanderSoldierId(e.target.value)}
-                    placeholder="7-digit ID"
-                    maxLength={7}
-                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-indigo-800 rounded text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-                <div className="col-span-5">
-                  <label className="block text-[10px] font-mono text-indigo-300 mb-1 uppercase">
-                    Officer Full Name &amp; Rank
-                  </label>
-                  <input
-                    type="text"
-                    value={commanderSoldierName}
-                    onChange={(e) => setCommanderSoldierName(e.target.value)}
-                    placeholder="e.g. Maj. Dan Alon"
-                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-indigo-800 rounded text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
-                  />
-                </div>
-                <div className="col-span-3">
-                  <label className="block text-[10px] font-mono text-indigo-300 mb-1 uppercase">
-                    Designation Role
-                  </label>
-                  <select
-                    value={commanderSoldierRole}
-                    onChange={(e) => setCommanderSoldierRole(e.target.value)}
-                    className="w-full px-2.5 py-1.5 bg-slate-950 border border-indigo-800 rounded text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-400 cursor-pointer"
-                  >
-                    <option value="commander">Commander</option>
-                    <option value="rifleman">Rifleman</option>
-                    <option value="sapper">Sapper</option>
-                    <option value="medic">Medic</option>
-                    <option value="recon">Recon</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Soldier Roster Builder (Available for both Command Centers & Field Combat Squads) */}
-          <div className="p-3 rounded-lg bg-slate-900/90 border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Users className="w-4 h-4 text-cyan-400" />
-                <span className="text-xs font-mono font-bold text-white tracking-wider">
-                  NEW SOLDIER ROSTER ({soldiers.length})
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={handleAddSoldier}
-                className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 text-[11px] font-mono flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-                <span>ADD SOLDIER</span>
-              </button>
-            </div>
-
-            {soldiers.length === 0 ? (
-              <p className="text-[11px] text-slate-400 font-mono">
-                Click "+ ADD SOLDIER" to register new soldiers directly into this unit's roster.
-              </p>
-            ) : (
-              soldiers.map((s, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                  <div className="col-span-3">
-                    <input
-                      type="text"
-                      required
-                      value={s.id}
-                      onChange={(e) => handleUpdateSoldier(idx, 'id', e.target.value)}
-                      placeholder="7-digit ID"
-                      maxLength={7}
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-                  <div className="col-span-5">
-                    <input
-                      type="text"
-                      required
-                      value={s.name}
-                      onChange={(e) => handleUpdateSoldier(idx, 'name', e.target.value)}
-                      placeholder="Soldier Name"
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-                  <div className="col-span-3">
-                    <select
-                      value={s.role}
-                      onChange={(e) => handleUpdateSoldier(idx, 'role', e.target.value)}
-                      className="w-full px-2 py-1.5 bg-slate-950 border border-slate-800 rounded text-xs font-mono text-slate-300 focus:outline-none focus:border-cyan-500 cursor-pointer"
-                    >
-                      <option value="rifleman">Rifleman</option>
-                      <option value="sapper">Sapper</option>
-                      <option value="medic">Medic</option>
-                      <option value="recon">Recon</option>
-                    </select>
-                  </div>
-                  <div className="col-span-1 text-center">
+              {/* Field 2 & 3: Role (EOD, Support/Non-combat, Combat) */}
+              <div>
+                <label className="block text-xs text-slate-300 mb-2 tracking-wider uppercase font-semibold">
+                  2. Operational Role
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['EOD', 'Support/Non-combat', 'Combat'] as SoldierRoleOption[]).map((r) => (
                     <button
                       type="button"
-                      onClick={() => handleRemoveSoldier(idx)}
-                      className="p-1 text-slate-500 hover:text-red-400 cursor-pointer"
+                      key={r}
+                      onClick={() => setSoldierRole(r)}
+                      className={`py-3 px-2 rounded-lg text-xs font-mono font-bold text-center border transition-all cursor-pointer ${
+                        soldierRole === r
+                          ? 'bg-cyan-950 text-cyan-300 border-cyan-400 shadow-[0_0_10px_rgba(0,229,255,0.25)]'
+                          : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <div className="text-[11px] leading-tight">{r}</div>
                     </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-slate-400">
+                  Selected Role: <span className="text-cyan-300 font-bold">{soldierRole}</span>
+                </p>
+              </div>
+
+              <div className="pt-4 flex justify-end gap-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="px-4 py-1.5 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs shadow-lg transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>{isLoading ? 'REGISTERING...' : 'ADD SOLDIER'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ========================================================= */}
+          {/* TAB 2: ADD FORCE (4 options: Administrator, Regional HQ, Radar, Field Force) */}
+          {/* Each requires: name, description. Regional HQ also requires: area/region. */}
+          {/* ========================================================= */}
+          {activeTab === 'force' && (
+            <form onSubmit={handleSubmitForce} className="space-y-4">
+              {/* Force Option Selector */}
+              <div>
+                <label className="block text-xs text-slate-300 mb-1.5 tracking-wider uppercase font-semibold">
+                  Select Force Type (4 Options)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(['Administrator', 'Regional HQ', 'Radar', 'Field Force'] as ForceTypeOption[]).map((t) => (
+                    <button
+                      type="button"
+                      key={t}
+                      onClick={() => setForceType(t)}
+                      className={`py-2 px-2 rounded-lg text-xs font-mono font-bold text-center border transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                        forceType === t
+                          ? 'bg-cyan-950 text-cyan-300 border-cyan-400 shadow-[0_0_10px_rgba(0,229,255,0.25)]'
+                          : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      {t === 'Administrator' && <Building2 className="w-4 h-4" />}
+                      {t === 'Regional HQ' && <Compass className="w-4 h-4" />}
+                      {t === 'Radar' && <Radio className="w-4 h-4" />}
+                      {t === 'Field Force' && <Users className="w-4 h-4" />}
+                      <span className="text-[11px] leading-tight">{t}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Force Name */}
+              <div>
+                <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
+                  Force Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder={
+                    forceType === 'Administrator'
+                      ? 'e.g. Central Command Authority'
+                      : forceType === 'Regional HQ'
+                      ? 'e.g. Northern Regional Command'
+                      : forceType === 'Radar'
+                      ? 'e.g. Hermon Radar Post 01'
+                      : 'e.g. Golani Bravo Patrol'
+                  }
+                  value={forceName}
+                  onChange={(e) => setForceName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Force Description */}
+              <div>
+                <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
+                  Force Description
+                </label>
+                <textarea
+                  required
+                  rows={2}
+                  placeholder="Operational responsibility, operational sector, and assigned capabilities"
+                  value={forceDescription}
+                  onChange={(e) => setForceDescription(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none resize-none"
+                />
+              </div>
+
+              {/* Regional HQ: Area/Region Requirement */}
+              {forceType === 'Regional HQ' && (
+                <div className="p-3 rounded-lg bg-indigo-950/40 border border-indigo-700/70 space-y-2">
+                  <label className="block text-xs text-indigo-300 tracking-wider uppercase font-semibold flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>Assigned Operational Area / Region (Required for Regional HQ)</span>
+                  </label>
+                  <select
+                    value={forceRegion}
+                    onChange={(e) => setForceRegion(e.target.value as Area)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-indigo-600 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="North">North (Lat ≥ 32.70 — Safed / Upper Galilee)</option>
+                    <option value="Center">Center (31.90 ≤ Lat &lt; 32.70 — Tel Aviv / Kirya)</option>
+                    <option value="South">South (Lat &lt; 31.90 — Beer Sheva / Negev)</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="pt-4 flex justify-end gap-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="px-4 py-1.5 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs shadow-lg transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>{isLoading ? 'CREATING...' : 'ADD FORCE'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* ========================================================= */}
+          {/* TAB 3: ADD USER (Username, Password) */}
+          {/* "Field Team" and "Radar": Created without linking to soldier. */}
+          {/* Other types: Must be linked to a soldier from dropdown (unlinked only). */}
+          {/* ========================================================= */}
+          {activeTab === 'user' && (
+            <form onSubmit={handleSubmitUser} className="space-y-4">
+              {/* User Type */}
+              <div>
+                <label className="block text-xs text-slate-300 mb-1.5 tracking-wider uppercase font-semibold">
+                  User Type / Role
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(['Field Team', 'Radar', 'Regional HQ', 'Administrator'] as UserTypeOption[]).map((t) => (
+                    <button
+                      type="button"
+                      key={t}
+                      onClick={() => setUserType(t)}
+                      className={`py-2 px-2 rounded-lg text-xs font-mono font-bold text-center border transition-all cursor-pointer ${
+                        userType === t
+                          ? 'bg-cyan-950 text-cyan-300 border-cyan-400 shadow-[0_0_10px_rgba(0,229,255,0.25)]'
+                          : 'bg-slate-900/60 hover:bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      <div className="text-[11px] leading-tight">{t}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Username & Password */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. operator_alpha"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Regional HQ: Region Selector */}
+              {userType === 'Regional HQ' && (
+                <div>
+                  <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
+                    Operational Region
+                  </label>
+                  <select
+                    value={userRegion}
+                    onChange={(e) => setUserRegion(e.target.value as Area)}
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="North">North Sector</option>
+                    <option value="Center">Center Sector</option>
+                    <option value="South">South Sector</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Soldier Linking Rule Section */}
+              {userType === 'Field Team' || userType === 'Radar' ? (
+                <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-700/60 text-emerald-300 text-xs flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Autonomous Force Account: </span>
+                    "{userType}" users are created without being linked to a specific soldier.
                   </div>
                 </div>
-              ))
-            )}
-          </div>
+              ) : (
+                <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-700/70 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs text-indigo-300 tracking-wider uppercase font-semibold flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5" />
+                      <span>Link to Soldier (Mandatory for {userType})</span>
+                    </label>
+                    <span className="text-[10px] text-cyan-300 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
+                      {unlinkedSoldiers.length} Unlinked Available
+                    </span>
+                  </div>
 
-          {/* Submit Buttons */}
-          <div className="flex items-center justify-between pt-3 border-t border-slate-800 shrink-0">
-            <div>
-              {!isSoldierRequirementMet && (
-                <span className="text-[11px] text-amber-400 font-mono">
-                  ⚠️ {isCommandCenterRole ? 'Attach at least 1 soldier for Command Center' : 'Attach at least 2 soldiers for Tactical Squad'}
-                </span>
+                  <p className="text-[11px] text-slate-400">
+                    Select an unlinked soldier from the registry. Already linked soldiers do not appear:
+                  </p>
+
+                  {isLoadingSoldiers ? (
+                    <div className="p-2 text-xs text-slate-400 animate-pulse">Loading unlinked soldiers...</div>
+                  ) : unlinkedSoldiers.length === 0 ? (
+                    <div className="p-2.5 rounded bg-amber-950/40 border border-amber-700/70 text-amber-200 text-xs">
+                      No unlinked soldiers are currently available. Please register a new soldier in the "Add Soldier" tab first.
+                    </div>
+                  ) : (
+                    <select
+                      required
+                      value={selectedSoldierId}
+                      onChange={(e) => setSelectedSoldierId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-indigo-500 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="">-- Choose unlinked soldier --</option>
+                      {unlinkedSoldiers.map((soldier) => (
+                        <option key={soldier.id} value={soldier.id}>
+                          {soldier.name} [ID: {soldier.id}] — Role: {soldier.role}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               )}
-            </div>
-            <div className="flex items-center space-x-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isLoading || !isSoldierRequirementMet}
-                title={
-                  !isSoldierRequirementMet
-                    ? isCommandCenterRole
-                      ? 'At least one soldier is required when registering a Command Center'
-                      : 'At least 2 soldiers are required when registering a Tactical Squad'
-                    : 'Register Force'
-                }
-                className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold tracking-wider shadow-lg shadow-cyan-900/40 border border-cyan-400/50 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {isLoading ? 'REGISTERING...' : 'REGISTER FORCE'}
-              </button>
-            </div>
-          </div>
-        </form>
+
+              <div className="pt-4 flex justify-end gap-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="px-4 py-1.5 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white font-bold text-xs shadow-lg transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>{isLoading ? 'CREATING...' : 'ADD USER'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   )

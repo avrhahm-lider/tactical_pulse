@@ -151,8 +151,22 @@ export const api = {
       const res = await apiClient.get<Soldier[]>('/admin/soldiers/unassigned')
       return res.data
     },
-    createSoldier: async (payload: { id: string; name: string; role: string; squad_id?: string | null }): Promise<Soldier> => {
-      const res = await apiClient.post<Soldier>('/admin/soldiers', payload)
+    getUnlinkedSoldiers: async (): Promise<Soldier[]> => {
+      try {
+        const res = await apiClient.get<Soldier[]>('/admin/soldiers/unlinked')
+        return res.data
+      } catch {
+        const [soldiersRes, usersRes] = await Promise.all([
+          apiClient.get<Soldier[]>('/admin/soldiers'),
+          apiClient.get<User[]>('/admin/users'),
+        ])
+        const linkedIds = new Set(usersRes.data.map((u) => u.soldier_id).filter(Boolean))
+        return soldiersRes.data.filter((s) => !linkedIds.has(s.id))
+      }
+    },
+    createSoldier: async (payload: { id?: string; name: string; role: string; squad_id?: string | null }): Promise<Soldier> => {
+      const soldierId = payload.id || Math.floor(1000000 + Math.random() * 9000000).toString()
+      const res = await apiClient.post<Soldier>('/admin/soldiers', { ...payload, id: soldierId })
       return res.data
     },
     updateSoldier: async (soldierId: string, payload: Partial<{ name: string; role: string; squad_id: string | null }>): Promise<Soldier> => {

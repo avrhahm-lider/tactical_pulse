@@ -53,7 +53,7 @@ export const App: React.FC = () => {
       <div className="h-screen w-screen bg-[#070a12] flex items-center justify-center font-mono text-cyan-400">
         <div className="flex flex-col items-center space-y-4">
           <div className="w-12 h-12 border-3 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
-          <div className="tracking-widest text-sm uppercase">INITIALIZING TACTICAL C2 INTERFACE...</div>
+          <div className="tracking-widest text-sm uppercase">INITIALIZING TACTICAL COMMAND INTERFACE...</div>
         </div>
       </div>
     )
