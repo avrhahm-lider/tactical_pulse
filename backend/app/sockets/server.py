@@ -134,8 +134,8 @@ async def connect(sid: str, environ: dict, auth: dict | None = None):
                 await sio.enter_room(sid, f"zone_{area}")
             if initial_lat is not None and initial_lon is not None:
                 await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client_info)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SOCKET WARNING] Post connect setup failed: {e}")
 
     _spawn_background_task(_post_connect_setup())
     return True
@@ -145,7 +145,11 @@ async def connect(sid: str, environ: dict, auth: dict | None = None):
 async def disconnect(sid: str):
     client = _connected_clients.pop(sid, None)
     if client:
-        sq_id = str(client.get("user_id"))
+        u_id = client.get("user_id")
+        if u_id:
+            _last_socket_db_save.pop(u_id, None)
+            _last_heartbeat_db_save.pop(u_id, None)
+        sq_id = str(u_id)
         prefix = f"{sq_id}_"
         for k in list(_active_danger_breaches):
             if k.startswith(prefix):
@@ -174,8 +178,8 @@ async def heartbeat(sid: str, data: dict):
             if map_ent:
                 map_ent.updated_at = datetime.now(UTC)
                 await session.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[HEARTBEAT DB WARNING] Heartbeat persistence failed: {e}")
 
 
 @sio.event
@@ -210,8 +214,8 @@ async def location_update(sid: str, data: dict):
         try:
             await sio.leave_room(sid, f"zone_{old_area}")
             await sio.enter_room(sid, f"zone_{new_area}")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SOCKET WARNING] Zone room switch failed: {e}")
 
     # Broadcast squad_moved payload with zero DB latency
     squad_moved_payload = {
@@ -362,8 +366,8 @@ async def broadcast_threat_event(event_name: str, threat_dict: dict):
         # Emit explicit threat_removed event so all clients remove the marker from maps
         try:
             await sio.emit("threat_removed", {"id": t_id})
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SOCKET WARNING] Threat removed broadcast failed: {e}")
     else:
         _active_threats_cache[t_id] = threat_dict
 
@@ -387,8 +391,8 @@ async def disconnect_user_sockets(user_id: str):
         if str(client.get("user_id")) == str(user_id):
             try:
                 await sio.disconnect(sid)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[SOCKET WARNING] Socket disconnect for {sid} failed: {e}")
 
 
 async def broadcast_unit_status_changed(unit_id: str, status: str):

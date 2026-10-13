@@ -364,7 +364,7 @@ async def update_threat(
         ip_address=client_ip,
     )
     await session.commit()
-    await session.refresh(threat)
+    await session.refresh(threat, ["created_by", "created_by_soldier"])
 
     resp = ThreatResponse.from_threat(threat, new_lat, new_lon)
     try:

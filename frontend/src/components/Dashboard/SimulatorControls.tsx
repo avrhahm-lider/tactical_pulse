@@ -155,22 +155,23 @@ export const SimulatorControls: React.FC = () => {
 
   // Dedicated Simulator Toggle Button placed above the map selection "hamburger" menu
   const renderToggleButton = () => (
-    <div className="absolute bottom-[56px] left-[10px] z-[1000]">
+    <div className="absolute bottom-[10px] left-[54px] z-[1000]">
       <button
         onClick={() => setIsOpen((prev) => !prev)}
         title={isOpen ? 'Close Tactical Simulator Panel' : 'Open Tactical Simulator Panel'}
-        className={`hud-panel px-3 py-1.5 rounded-lg border flex items-center space-x-2 font-mono text-xs shadow-xl cursor-pointer transition-all ${
+        aria-label="Tactical Simulator"
+        className={`relative w-[36px] h-[36px] rounded-lg border flex items-center justify-center shadow-lg transition-all cursor-pointer ${
           isOpen
-            ? 'bg-cyan-950 border-cyan-400 text-cyan-200 shadow-cyan-950/70 ring-1 ring-cyan-400/50'
-            : 'bg-slate-900/90 hover:bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:border-slate-500'
+            ? 'bg-cyan-950/95 border-cyan-400 text-cyan-300 shadow-cyan-950/70 ring-1 ring-cyan-400/50'
+            : 'bg-slate-900/95 hover:bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:border-slate-500'
         }`}
       >
-        <Sliders className={`w-3.5 h-3.5 ${isOpen ? 'text-cyan-400' : 'text-slate-400'}`} />
-        <span className="font-bold tracking-wider text-[11px]">SIMULATOR</span>
+        <Sliders className={`w-4 h-4 ${isOpen ? 'text-cyan-400' : isSimulatorRunning ? 'text-emerald-400' : 'text-slate-300'}`} />
+
         {isSimulatorRunning && (
-          <span className="relative flex h-2 w-2">
+          <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-slate-900"></span>
           </span>
         )}
       </button>
@@ -194,7 +195,7 @@ export const SimulatorControls: React.FC = () => {
     return (
       <>
         {renderToggleButton()}
-        <div className="absolute bottom-[98px] left-[10px] z-[1000] hud-panel w-72 rounded-xl border border-cyan-800 shadow-2xl hud-glow-cyan text-xs font-mono max-h-[calc(100vh-120px)] overflow-y-auto">
+        <div className="absolute bottom-[54px] left-[10px] z-[1000] hud-panel w-72 rounded-xl border border-cyan-800 shadow-2xl hud-glow-cyan text-xs font-mono max-h-[calc(100vh-80px)] overflow-y-auto">
           <div className="p-3 flex items-center justify-between border-b border-slate-800 bg-slate-950/80">
             <div className="flex items-center space-x-2 text-cyan-400 font-bold">
               <Navigation className="w-4 h-4 animate-pulse" />
@@ -308,7 +309,7 @@ export const SimulatorControls: React.FC = () => {
     return (
       <>
         {renderToggleButton()}
-        <div className="absolute bottom-[98px] left-[10px] z-[1000] hud-panel w-84 rounded-xl border border-sky-800 shadow-2xl hud-glow-cyan text-xs font-mono max-h-[calc(100vh-120px)] overflow-y-auto">
+        <div className="absolute bottom-[54px] left-[10px] z-[1000] hud-panel w-84 rounded-xl border border-sky-800 shadow-2xl hud-glow-cyan text-xs font-mono max-h-[calc(100vh-80px)] overflow-y-auto">
           <div className="p-3 flex items-center justify-between border-b border-slate-800 bg-slate-950/80">
             <div className="flex items-center space-x-2 text-sky-400 font-bold">
               <Radio className="w-4 h-4 animate-pulse" />
@@ -481,7 +482,7 @@ export const SimulatorControls: React.FC = () => {
   return (
     <>
       {renderToggleButton()}
-      <div className="absolute bottom-[98px] left-[10px] z-[1000] hud-panel w-96 rounded-xl border border-cyan-800 shadow-2xl hud-glow-cyan text-xs font-mono max-h-[calc(100vh-120px)] overflow-y-auto">
+      <div className="absolute bottom-[54px] left-[10px] z-[1000] hud-panel w-96 rounded-xl border border-cyan-800 shadow-2xl hud-glow-cyan text-xs font-mono max-h-[calc(100vh-80px)] overflow-y-auto">
         {/* Header with Master Simulation Toggle */}
         <div className="p-3 border-b border-slate-800 bg-slate-950/90 flex items-center justify-between">
           <div className="flex items-center space-x-2 text-cyan-400 font-bold">

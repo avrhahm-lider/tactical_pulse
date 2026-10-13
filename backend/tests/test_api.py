@@ -333,11 +333,20 @@ async def test_soldiers_and_command_centers():
         )
         assert field_res.status_code == 201
         field_data = field_res.json()
-        assert field_data["lat"] == 33.0
-        assert field_data["lon"] == 35.3
+        assert field_data["lat"] is None
+        assert field_data["lon"] is None
         assert field_data["area"] == "North"
         assert len(field_data["soldiers"]) == 1
         assert len(field_data["soldiers"][0]["id"]) == 7
+
+        # 8. Test DELETE user endpoint
+        del_res = await client.delete(f"/api/v1/admin/users/{field_data['id']}", headers=headers)
+        assert del_res.status_code == 200
+        assert "deleted successfully" in del_res.json()["message"]
+
+        # Verify user is removed from user directory
+        users_after = (await client.get("/api/v1/admin/users", headers=headers)).json()
+        assert not any(u["id"] == field_data["id"] for u in users_after)
 
         # Clean up auto soldier
         await client.delete(f"/api/v1/admin/soldiers/{auto_soldier['id']}", headers=headers)

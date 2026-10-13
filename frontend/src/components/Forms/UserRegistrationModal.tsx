@@ -212,11 +212,9 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         defaultLat = 33.1000
         defaultLon = 35.4000
       } else {
-        // Field Force
+        // Field Force (Squad) - coordinates will be provided when unit goes online
         backendRole = 'Squad'
         backendArea = 'Center'
-        defaultLat = 32.0853
-        defaultLon = 34.7818
       }
 
       const payload: Record<string, unknown> = {
@@ -226,8 +224,11 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         password: generatedPassword,
         role: backendRole,
         area: backendArea,
-        lat: defaultLat,
-        lon: defaultLon,
+      }
+
+      if (backendRole !== 'Squad') {
+        payload.lat = defaultLat
+        payload.lon = defaultLon
       }
 
       // If command center requires a soldier in the existing backend, attach first available or mock
@@ -318,12 +319,10 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         defaultLat = 33.1000
         defaultLon = 35.4000
       } else {
-        // Field Team
+        // Field Team (Squad) - coordinates will be provided when unit goes online
         backendRole = 'Squad'
         backendArea = 'Center'
         displayName = `Field Team - ${username.trim()}`
-        defaultLat = 32.0853
-        defaultLon = 34.7818
       }
 
       const payload: Record<string, unknown> = {
@@ -333,8 +332,11 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         area: backendArea,
         name: displayName,
         description: `Operational account for ${userType}`,
-        lat: defaultLat,
-        lon: defaultLon,
+      }
+
+      if (backendRole !== 'Squad') {
+        payload.lat = defaultLat
+        payload.lon = defaultLon
       }
 
       // Only link soldier if not Field Team or Radar
@@ -710,16 +712,8 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                 </div>
               )}
 
-              {/* Soldier Linking Rule Section */}
-              {userType === 'Field Team' || userType === 'Radar' ? (
-                <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-700/60 text-emerald-300 text-xs flex items-start gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold">Autonomous Force Account: </span>
-                    "{userType}" users are created without being linked to a specific soldier.
-                  </div>
-                </div>
-              ) : (
+              {/* Soldier Linking Rule Section (only for user types that require soldier linking) */}
+              {userType !== 'Field Team' && userType !== 'Radar' && (
                 <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-700/70 space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs text-indigo-300 tracking-wider uppercase font-semibold flex items-center gap-1.5">

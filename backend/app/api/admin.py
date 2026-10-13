@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request, status
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_command_center, require_main_command
@@ -14,6 +14,7 @@ from app.core.security import hash_password
 from app.db.postgres import get_db
 from app.models.map_entity import MapEntity
 from app.models.soldier import Soldier
+from app.models.threat import Threat
 from app.models.user import User
 from app.schemas.auth import MessageResponse
 from app.schemas.soldier import SoldierCreate, SoldierResponse, SoldierUpdate
@@ -26,7 +27,7 @@ from app.schemas.user import (
 )
 from app.services.audit import log_audit_event
 from app.services.spatial import calculate_area_from_lat
-from app.sockets.server import broadcast_unit_status_changed
+from app.sockets.server import broadcast_unit_status_changed, disconnect_user_sockets, sio
 
 router = APIRouter(prefix="/admin", tags=["Administration"])
 
@@ -56,7 +57,7 @@ def _build_admin_user_response(
     soldiers: list | None = None,
 ) -> AdminUserResponse:
     m_lat, m_lon = _mask_confidential_coords(u.role, lat, lon)
-    roster = soldiers if soldiers is not None else u.soldiers
+    roster = soldiers if soldiers is not None else (u.soldiers or [])
     return AdminUserResponse(
         id=u.id,
         username=u.username,
@@ -460,21 +461,12 @@ async def create_user_or_unit(
                 message=f"Soldier military ID(s) already registered: {', '.join(conflict_soldier_ids)}",
             )
 
-    # Provide safe tactical coordinate defaults for field units if not supplied by the form
     is_field_unit = assigned_role in ["Squad", "SapperSquad", "Radar"]
-    if is_field_unit and (req.lat is None or req.lon is None):
-        sector_coords = {
-            "North": (33.0000, 35.3000),
-            "Center": (32.0853, 34.7818),
-            "South": (31.2000, 34.7000),
-            "Global": (32.0853, 34.7818),
-        }
-        req.lat, req.lon = sector_coords.get(
-            assigned_area or "Center", (32.0853, 34.7818)
-        )
-
     if is_field_unit:
-        assigned_area = calculate_area_from_lat(req.lat)
+        if req.lat is not None:
+            assigned_area = calculate_area_from_lat(req.lat)
+        elif not assigned_area:
+            assigned_area = "Center"
     elif assigned_role == "MainCommandCenter":
         assigned_area = "Global"
     elif assigned_role == "AreaCommandCenter" and not assigned_area:
@@ -767,3 +759,72 @@ async def reset_all_sessions(
     return MessageResponse(
         message=f"All active user sessions reset successfully ({count} users updated)"
     )
+
+
+@router.delete("/users/{user_id}", response_model=MessageResponse)
+async def delete_user(
+    user_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_db),
+    current_admin: User = Depends(require_main_command),
+):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        raise AppException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="NOT_FOUND",
+            message=f"User with ID '{user_id}' not found",
+        )
+
+    if user.id == current_admin.id:
+        raise AppException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="INVALID_REQUEST",
+            message="Cannot delete your own administrator account",
+        )
+
+    username = user.username
+
+    # 1. Disconnect active sockets
+    await disconnect_user_sockets(str(user.id))
+
+    # 2. Remove associated MapEntity
+    await session.execute(delete(MapEntity).where(MapEntity.id == user.id))
+
+    # 3. Unassign roster soldiers so they remain in personnel registry
+    await session.execute(update(Soldier).where(Soldier.squad_id == user.id).values(squad_id=None))
+
+    # 4. Unassign threats assigned to this user/squad
+    await session.execute(
+        update(Threat)
+        .where(Threat.assigned_to_id == user.id)
+        .values(assigned_to_id=None, engagement_status="unassigned")
+    )
+
+    # 5. Reassign threats created by this user to current_admin to prevent foreign key constraint violation
+    await session.execute(
+        update(Threat)
+        .where(Threat.created_by_id == user.id)
+        .values(created_by_id=current_admin.id)
+    )
+
+    # 6. Delete user account
+    await session.delete(user)
+
+    await log_audit_event(
+        session=session,
+        action="user_deleted",
+        user_id=current_admin.id,
+        resource_type="user",
+        resource_id=user_id,
+        details={"deleted_username": username},
+        ip_address=client_ip,
+    )
+    await session.commit()
+
+    # 7. Broadcast WebSocket event to all clients to remove this unit
+    await sio.emit("unit_status_changed", {"id": str(user_id), "status": "deleted"})
+
+    return MessageResponse(message=f"User '{username}' deleted successfully")

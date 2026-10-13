@@ -135,6 +135,10 @@ export const api = {
       const res = await apiClient.patch<User>(`/admin/users/${userId}/status`, { status })
       return res.data
     },
+    deleteUser: async (userId: string): Promise<{ message: string }> => {
+      const res = await apiClient.delete<{ message: string }>(`/admin/users/${userId}`)
+      return res.data
+    },
     resetAllSessions: async (): Promise<{ message: string }> => {
       const res = await apiClient.post<{ message: string }>('/admin/users/reset-all-sessions')
       return res.data

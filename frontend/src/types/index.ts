@@ -149,7 +149,7 @@ export interface SquadMovedPayload {
 
 export interface UnitStatusChangedPayload {
   id: string
-  status: UserStatus
+  status: UserStatus | 'deleted'
 }
 
 export interface DangerZoneAlert {

@@ -13,6 +13,7 @@ import {
   Shield,
   Building2,
   Key,
+  Trash2,
 } from 'lucide-react'
 import { DroneIcon } from '../Common/DroneIcon'
 import { AddSoldierModal } from '../Forms/AddSoldierModal'
@@ -63,12 +64,7 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
   // 2. Live session transmitting units only (Field units currently transmitting telemetry)
   const fieldSquadList = rosterList.filter((sq) => !isHQOrRadar(sq))
   const transmittingList = fieldSquadList.filter((sq) => isSquadTransmitting(sq, user, fieldSquadList))
-  const liveSquadList =
-    transmittingList.length > 0
-      ? transmittingList
-      : fieldSquadList.length > 0
-      ? [fieldSquadList[0]]
-      : []
+  const liveSquadList = transmittingList
 
   // 3. Active tactical alerts
   const activeThreatList = Object.values(threats).filter(
@@ -85,6 +81,27 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
     } catch (err) {
       console.error(err)
       alert('Failed to deactivate unit.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleDeleteUnit = async (squadId: string) => {
+    if (
+      !window.confirm(
+        'Are you sure you want to permanently delete this user account and operational unit? All assigned assets will be unassigned. This cannot be undone.'
+      )
+    ) {
+      return
+    }
+    setIsLoading(true)
+    try {
+      await api.admin.deleteUser(squadId)
+      removeSquad(squadId)
+      setSelectedSquad(null)
+    } catch (err) {
+      console.error(err)
+      alert('Failed to delete user account.')
     } finally {
       setIsLoading(false)
     }
@@ -431,11 +448,22 @@ export const UnitListDrawer: React.FC<UnitListDrawerProps> = ({
                 <button
                   onClick={() => handleDeactivateUnit(selectedSquad.id)}
                   disabled={isLoading}
-                  className="text-[10px] px-2 py-1 bg-red-950 hover:bg-red-900 border border-red-700 text-red-300 rounded font-mono flex items-center space-x-1 cursor-pointer"
+                  className="text-[10px] px-2 py-1 bg-amber-950 hover:bg-amber-900 border border-amber-700 text-amber-300 rounded font-mono flex items-center space-x-1 cursor-pointer"
                 >
                   <UserX className="w-3 h-3" />
                   <span>DEACTIVATE</span>
                 </button>
+                {selectedSquad.id !== user?.id && (
+                  <button
+                    onClick={() => handleDeleteUnit(selectedSquad.id)}
+                    disabled={isLoading}
+                    className="text-[10px] px-2 py-1 bg-red-950 hover:bg-red-900 border border-red-700 text-red-300 rounded font-mono flex items-center space-x-1 cursor-pointer"
+                    title="Permanently delete user and unit"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>DELETE</span>
+                  </button>
+                )}
               </div>
             )}
           </div>

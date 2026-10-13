@@ -58,7 +58,7 @@ class UserResponse(BaseModel):
     status: UserStatus
     soldier_id: str | None = None
     soldier: SoldierResponse | None = None
-    soldiers: list[SoldierResponse] = []
+    soldiers: list[SoldierResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

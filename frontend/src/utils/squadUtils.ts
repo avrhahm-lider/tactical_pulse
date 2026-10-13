@@ -17,7 +17,7 @@ export function isHQOrRadar(squad: Squad): boolean {
 export function isSquadTransmitting(
   squad: Squad,
   currentUser?: User | null,
-  allSquads?: Squad[]
+  _allSquads?: Squad[]
 ): boolean {
   if (isHQOrRadar(squad)) {
     return false
@@ -36,22 +36,6 @@ export function isSquadTransmitting(
     const diffMs = Date.now() - new Date(squad.updated_at).getTime()
     if (diffMs < 60000) {
       return true
-    }
-  }
-
-  // Fallback: If no socket movement in <60s yet, identify the single primary active transmitter
-  if (allSquads) {
-    const fieldUnits = allSquads.filter(
-      (s) => s.status === 'active' && !isHQOrRadar(s)
-    )
-    if (fieldUnits.length > 0 && fieldUnits[0].id === squad.id) {
-      const anyRecent = fieldUnits.some(
-        (s) =>
-          s.updated_at && Date.now() - new Date(s.updated_at).getTime() < 60000
-      )
-      if (!anyRecent) {
-        return true
-      }
     }
   }
 

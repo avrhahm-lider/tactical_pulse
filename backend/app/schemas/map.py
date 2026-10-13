@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.soldier import SoldierResponse
 from app.schemas.threat import ThreatResponse
@@ -18,7 +18,7 @@ class SquadSnapshotItem(BaseModel):
     heading: float = 0.0
     status: str
     updated_at: datetime
-    soldiers: list[SoldierResponse] = []
+    soldiers: list[SoldierResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

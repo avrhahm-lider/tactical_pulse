@@ -36,8 +36,7 @@ async def start_simulator(
     current_admin: User = Depends(require_main_command),
 ):
     """Starts autonomous live simulation (all, squads, or drones)."""
-    res = await simulator_engine.start(mode=req.mode)
-    return res
+    return await simulator_engine.start(mode=req.mode)
 
 
 @router.post("/stop")
@@ -45,8 +44,7 @@ async def stop_simulator(
     current_admin: User = Depends(require_main_command),
 ):
     """Stops all running simulation tasks."""
-    res = await simulator_engine.stop()
-    return res
+    return await simulator_engine.stop()
 
 
 @router.post("/step")
@@ -55,10 +53,9 @@ async def manual_step_simulator(
     current_admin: User = Depends(require_main_command),
 ):
     """Manually nudges a single squad or drone by one step in the specified direction."""
-    res = await simulator_engine.manual_step(
+    return await simulator_engine.manual_step(
         target_type=req.target_type,
         target_id=req.target_id,
         direction=req.direction,
         delta=req.delta or 0.0005,
     )
-    return res
