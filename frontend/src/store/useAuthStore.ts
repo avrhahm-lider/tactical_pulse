@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api } from '../services/api'
+import { api, API_BASE_URL } from '../services/api'
 import type { User } from '../types'
 
 interface AuthState {
@@ -35,7 +35,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
 
       console.group('%c[Tactical Pulse] Authentication Error Details', 'color: #ef4444; font-weight: bold; font-size: 12px;')
-      console.error('Target Endpoint:', 'http://localhost:8000/api/v1/auth/login')
+      console.error('Target Endpoint:', `${API_BASE_URL}/auth/login`)
       console.error('Error Code:', axiosErr.code || 'UNKNOWN')
       console.error('Error Message:', axiosErr.message || 'No message')
       console.error('HTTP Status:', axiosErr.response?.status ?? 'None (No response received from server)')
@@ -47,7 +47,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       if (!axiosErr.response) {
         // No HTTP response was received — server is offline, port is closed, or CORS failed
-        message = `Cannot reach backend server at http://localhost:8000 (${axiosErr.code || 'ERR_CONNECTION_REFUSED'}). Is the FastAPI backend running?`
+        message = `Cannot reach backend server at ${API_BASE_URL} (${axiosErr.code || 'ERR_CONNECTION_REFUSED'}). Is the backend running?`
       } else if (axiosErr.response.data?.error?.code === 'SESSION_ACTIVE' || axiosErr.response.status === 409) {
         message = "Account is active in another session. Use 'Reset All Sessions' button on the login screen or wait 10 min."
       } else if (axiosErr.response.data?.error?.message) {

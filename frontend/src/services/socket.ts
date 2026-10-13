@@ -2,7 +2,8 @@ import { io, Socket } from 'socket.io-client'
 import { useMapStore } from '../store/useMapStore'
 import type { SquadMovedPayload, Threat, UnitStatusChangedPayload } from '../types'
 
-export const SOCKET_URL = 'http://localhost:8000'
+export const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL || 'https://tactical-pulse-1.onrender.com'
 
 let socket: Socket | null = null
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null
