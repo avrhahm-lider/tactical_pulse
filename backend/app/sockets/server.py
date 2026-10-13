@@ -1,11 +1,10 @@
 import asyncio
-import math
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+import jwt
 import socketio
-from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
 from sqlalchemy import select
 
@@ -15,7 +14,11 @@ from app.db.postgres import async_session_maker
 from app.models.map_entity import MapEntity
 from app.models.threat import Threat
 from app.models.user import User
-from app.services.spatial import calculate_area_from_lat
+from app.services.spatial import (
+    calculate_area_from_lat,
+    haversine_distance_meters,
+    persist_squad_location,
+)
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
@@ -33,6 +36,14 @@ _active_threats_cache: dict[str, dict] = {}
 _active_danger_breaches: set = set()
 _last_socket_db_save: dict[UUID, float] = {}
 _last_heartbeat_db_save: dict[UUID, float] = {}
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background_task(coro):
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
 
 
 async def _ensure_threats_cache_loaded(session):
@@ -72,8 +83,7 @@ async def connect(sid: str, environ: dict, auth: dict | None = None):
         if not user_id_str or payload.get("type") != "access":
             return False
         user_id = UUID(user_id_str)
-    except Exception as e:
-        print(f"[AUTH EXCEPTION] Invalid JWT handshake: {e}")
+    except (jwt.PyJWTError, ValueError):
         return False
 
     # Enforce active user status and fetch initial coordinates from DB
@@ -127,7 +137,7 @@ async def connect(sid: str, environ: dict, auth: dict | None = None):
         except Exception:
             pass
 
-    asyncio.create_task(_post_connect_setup())
+    _spawn_background_task(_post_connect_setup())
     return True
 
 
@@ -227,50 +237,7 @@ async def location_update(sid: str, data: dict):
     now_ts = asyncio.get_event_loop().time()
     if now_ts - _last_socket_db_save.get(target_id, 0.0) >= 3.0:
         _last_socket_db_save[target_id] = now_ts
-
-        async def _save_squad_coords():
-            try:
-                async with async_session_maker() as session:
-                    map_stmt = select(MapEntity).where(MapEntity.id == target_id)
-                    map_res = await session.execute(map_stmt)
-                    map_ent = map_res.scalar_one_or_none()
-
-                    if map_ent:
-                        map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                        map_ent.heading = heading
-                        map_ent.updated_at = now
-                    else:
-                        map_ent = MapEntity(
-                            id=target_id,
-                            geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                            heading=heading,
-                            status="active",
-                            updated_at=now,
-                        )
-                        session.add(map_ent)
-
-                    user_stmt = select(User).where(User.id == target_id)
-                    user_res = await session.execute(user_stmt)
-                    user_obj = user_res.scalar_one_or_none()
-                    if user_obj and user_obj.area != new_area:
-                        user_obj.area = new_area
-
-                    await session.commit()
-            except Exception as e:
-                print(f"[SOCKET DB ERROR] Error updating squad location in db: {e}")
-
-        asyncio.create_task(_save_squad_coords())
-
-
-def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371000.0
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    delta_phi = math.radians(lat2 - lat1)
-    delta_lambda = math.radians(lon2 - lon1)
-    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * (math.sin(delta_lambda / 2.0) ** 2)
-    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
-    return r * c
+        _spawn_background_task(persist_squad_location(target_id, lat, lon, heading, new_area, now))
 
 
 async def _process_squad_threat_breach(sq_sid: str | None, sq_id: str, sq_name: str, sq_lat: float, sq_lon: float, t: dict):
@@ -361,7 +328,7 @@ async def broadcast_to_visibility_range(
         role = info.get("role")
         area = info.get("area")
 
-        if role == "MainCommandCenter" or role == "AreaCommandCenter" and area == origin_area:
+        if role == "MainCommandCenter" or (role == "AreaCommandCenter" and area == origin_area):
             await sio.emit(event_name, payload, room=client_sid)
         elif role in ["Squad", "SapperSquad", "Radar"]:
             # Radar stations monitor aerial drones anywhere across Israeli airspace
@@ -387,9 +354,11 @@ async def broadcast_threat_event(event_name: str, threat_dict: dict):
             if k.endswith(f"_{t_id}"):
                 _active_danger_breaches.discard(k)
                 sq_id = k.split("_")[0]
+                clear_payload = {"id": k, "squad_id": sq_id, "threat_id": t_id}
                 for c_sid, c_info in list(_connected_clients.items()):
                     if str(c_info.get("user_id")) == sq_id:
-                        await sio.emit("danger_zone_cleared", {"id": k, "squad_id": sq_id, "threat_id": t_id}, room=c_sid)
+                        await sio.emit("danger_zone_cleared", clear_payload, room=c_sid)
+                await sio.emit("danger_zone_cleared", clear_payload, room="role_MainCommandCenter")
         # Emit explicit threat_removed event so all clients remove the marker from maps
         try:
             await sio.emit("threat_removed", {"id": t_id})

@@ -1,14 +1,67 @@
+import math
+from datetime import datetime
 from uuid import UUID
 
 from geoalchemy2 import Geography
+from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y, ST_DWithin, ST_MakePoint, ST_SetSRID
 from sqlalchemy import and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.db.postgres import async_session_maker
 from app.models.map_entity import MapEntity
 from app.models.threat import Threat
 from app.models.user import User
+
+
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculates great-circle distance between two GPS coordinates in meters."""
+    r = 6371000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi1) * math.cos(phi2) * (math.sin(delta_lambda / 2.0) ** 2)
+    return r * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+
+
+async def persist_squad_location(
+    squad_id: UUID,
+    lat: float,
+    lon: float,
+    heading: float,
+    area: str,
+    updated_at: datetime,
+) -> None:
+    """Safely updates squad MapEntity and sector in PostgreSQL."""
+    async with async_session_maker() as session:
+        map_ent = (await session.execute(
+            select(MapEntity).where(MapEntity.id == squad_id)
+        )).scalar_one_or_none()
+
+        if map_ent:
+            map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
+            map_ent.heading = heading
+            map_ent.updated_at = updated_at
+        else:
+            session.add(
+                MapEntity(
+                    id=squad_id,
+                    geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
+                    heading=heading,
+                    status="active",
+                    updated_at=updated_at,
+                )
+            )
+
+        user_obj = (await session.execute(
+            select(User).where(User.id == squad_id)
+        )).scalar_one_or_none()
+        if user_obj and user_obj.area != area:
+            user_obj.area = area
+
+        await session.commit()
 
 
 async def get_caller_coordinates(session: AsyncSession, user_id: UUID) -> tuple[float, float] | None:

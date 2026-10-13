@@ -15,7 +15,7 @@ from app.models.soldier import Soldier
 from app.models.threat import Threat
 from app.models.user import User
 from app.schemas.threat import ThreatResponse
-from app.services.spatial import calculate_area_from_lat
+from app.services.spatial import calculate_area_from_lat, persist_squad_location
 from app.sockets.server import (
     _ensure_threats_cache_loaded,
     broadcast_threat_event,
@@ -202,6 +202,13 @@ class SimulatorEngine:
         self._db_save_in_flight: set[str] = set()
         self._latest_squad_state: dict[UUID, tuple[float, float, float, str, datetime]] = {}
         self._latest_drone_state: dict[UUID, tuple[float, float, float, datetime]] = {}
+        self._bg_persist_tasks: set[asyncio.Task] = set()
+
+    def _spawn_persist_task(self, coro):
+        task = asyncio.create_task(coro)
+        self._bg_persist_tasks.add(task)
+        task.add_done_callback(self._bg_persist_tasks.discard)
+        return task
 
     @property
     def is_running(self) -> bool:
@@ -232,32 +239,7 @@ class SimulatorEngine:
         key = f"squad_{squad_id}"
         self._db_save_in_flight.add(key)
         try:
-            async with async_session_maker() as session:
-                map_stmt = select(MapEntity).where(MapEntity.id == squad_id)
-                map_res = await session.execute(map_stmt)
-                map_ent = map_res.scalar_one_or_none()
-
-                if map_ent:
-                    map_ent.geom = WKTElement(f"POINT({lon} {lat})", srid=4326)
-                    map_ent.heading = heading
-                    map_ent.updated_at = now
-                else:
-                    map_ent = MapEntity(
-                        id=squad_id,
-                        geom=WKTElement(f"POINT({lon} {lat})", srid=4326),
-                        heading=heading,
-                        status="active",
-                        updated_at=now,
-                    )
-                    session.add(map_ent)
-
-                user_stmt = select(User).where(User.id == squad_id)
-                user_res = await session.execute(user_stmt)
-                user_obj = user_res.scalar_one_or_none()
-                if user_obj and user_obj.area != area:
-                    user_obj.area = area
-
-                await session.commit()
+            await persist_squad_location(squad_id, lat, lon, heading, area, now)
         except Exception as e:
             print(f"[SIMULATOR DB ERROR] Error updating squad location: {e}")
         finally:
@@ -340,7 +322,7 @@ class SimulatorEngine:
             force_db or (now_ts - self._last_db_save.get(squad_key, 0.0) >= 3.0)
         ):
             self._last_db_save[squad_key] = now_ts
-            asyncio.create_task(
+            self._spawn_persist_task(
                 self._persist_squad_coords(squad_id, lat, lon, heading, area, now)
             )
 
@@ -402,7 +384,7 @@ class SimulatorEngine:
             force_db or (now_ts - self._last_db_save.get(drone_key, 0.0) >= 3.0)
         ):
             self._last_db_save[drone_key] = now_ts
-            asyncio.create_task(
+            self._spawn_persist_task(
                 self._persist_drone_coords(threat_id, lat, lon, altitude, now)
             )
 
@@ -686,15 +668,13 @@ class SimulatorEngine:
                 coords = (await session.execute(select(ST_Y(map_ent.geom), ST_X(map_ent.geom)))).first()
                 curr_lat, curr_lon = coords[0], coords[1]
 
-            d_lat = delta if direction == "up" else (-delta if direction == "down" else 0.0)
-            d_lon = delta if direction == "right" else (-delta if direction == "left" else 0.0)
-            heading = (
-                0.0 if direction == "up"
-                else (180.0 if direction == "down"
-                else (90.0 if direction == "right"
-                else 270.0))
-            )
-
+            squad_deltas = {
+                "up": (delta, 0.0, 0.0),
+                "down": (-delta, 0.0, 180.0),
+                "right": (0.0, delta, 90.0),
+                "left": (0.0, -delta, 270.0),
+            }
+            d_lat, d_lon, heading = squad_deltas.get(direction, (0.0, 0.0, 0.0))
             new_lat = curr_lat + d_lat
             new_lon = curr_lon + d_lon
             await self.update_squad_location(target_id, new_lat, new_lon, heading, force_db=True)
@@ -717,12 +697,18 @@ class SimulatorEngine:
                 curr_lat, curr_lon = coords[0], coords[1]
                 curr_alt = threat.altitude or 300.0
 
-            d_lat = delta if direction == "up" else (-delta if direction == "down" else 0.0)
-            d_lon = delta if direction == "right" else (-delta if direction == "left" else 0.0)
-            new_alt = curr_alt + (20.0 if direction == "alt_up" else (-20.0 if direction == "alt_down" else 0.0))
-
+            drone_deltas = {
+                "up": (delta, 0.0, 0.0),
+                "down": (-delta, 0.0, 0.0),
+                "right": (0.0, delta, 0.0),
+                "left": (0.0, -delta, 0.0),
+                "alt_up": (0.0, 0.0, 20.0),
+                "alt_down": (0.0, 0.0, -20.0),
+            }
+            d_lat, d_lon, d_alt = drone_deltas.get(direction, (0.0, 0.0, 0.0))
             new_lat = curr_lat + d_lat
             new_lon = curr_lon + d_lon
+            new_alt = curr_alt + d_alt
             await self.update_drone_location(target_id, new_lat, new_lon, new_alt, force_db=True)
             return {
                 "status": "ok",

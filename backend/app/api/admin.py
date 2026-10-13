@@ -30,6 +30,9 @@ from app.sockets.server import broadcast_unit_status_changed
 router = APIRouter(prefix="/admin", tags=["Administration"])
 
 
+RE_SOLDIER_ID = re.compile(r"^\d{7}$")
+
+
 # =========================================================================
 # HELPERS
 # =========================================================================
@@ -78,7 +81,7 @@ async def _validate_soldier_ids(
             message="Duplicate soldier IDs found in soldier_ids list",
         )
     for s_id in soldier_ids:
-        if not re.match(r"^\d{7}$", s_id):
+        if not RE_SOLDIER_ID.match(s_id):
             raise AppException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 code="VALIDATION_ERROR",
@@ -296,6 +299,7 @@ async def create_user_or_unit(
             message=f"Username '{req.username}' already exists",
         )
 
+    soldier = None
     if req.soldier_id:
         soldier = (await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))).scalar_one_or_none()
         if not soldier:
@@ -403,10 +407,8 @@ async def create_user_or_unit(
     if soldiers_created:
         session.add_all(soldiers_created)
 
-    if req.soldier_id:
-        cmd_soldier = (await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))).scalar_one_or_none()
-        if cmd_soldier and cmd_soldier.squad_id is None:
-            cmd_soldier.squad_id = new_user.id
+    if soldier and soldier.squad_id is None:
+        soldier.squad_id = new_user.id
 
     if (is_field_unit or assigned_role == "AreaCommandCenter") and req.lat is not None and req.lon is not None:
         session.add(

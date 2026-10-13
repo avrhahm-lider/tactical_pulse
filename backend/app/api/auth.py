@@ -3,6 +3,7 @@ import uuid
 from datetime import UTC, datetime
 from uuid import UUID
 
+import jwt
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +49,7 @@ def check_rate_limit(username: str, client_ip: str) -> None:
 
     key = (username, client_ip)
     if key in _login_attempts:
-        failures, last_attempt, locked_until = _login_attempts[key]
+        _failures, last_attempt, locked_until = _login_attempts[key]
         if now < locked_until:
             wait_seconds = int(locked_until - now)
             raise AppException(
@@ -184,7 +185,7 @@ async def refresh_token_endpoint(
         if not user_id_str or token_type != "refresh":
             raise ValueError("Invalid refresh token payload")
         user_id = UUID(user_id_str)
-    except Exception:
+    except (jwt.PyJWTError, ValueError):
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",

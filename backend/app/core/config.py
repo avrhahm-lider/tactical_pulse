@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from pydantic import field_validator
@@ -15,9 +16,9 @@ class Settings(BaseSettings):
     def assemble_db_connection(cls, v: str) -> str:
         if isinstance(v, str):
             if v.startswith("postgres://"):
-                return v.replace("postgres://", "postgresql+asyncpg://", 1)
-            elif v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
-                return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+                return "postgresql+asyncpg://" + v[11:]
+            if v.startswith("postgresql://") and not v.startswith("postgresql+asyncpg://"):
+                return "postgresql+asyncpg://" + v[13:]
         return v
 
     # JWT Security
@@ -32,11 +33,11 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Any) -> list[str]:
         if isinstance(v, str):
-            if v.strip().startswith("[") and v.strip().endswith("]"):
-                import json
+            stripped = v.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
                 try:
-                    return json.loads(v)
-                except Exception:
+                    return json.loads(stripped)
+                except json.JSONDecodeError:
                     pass
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v

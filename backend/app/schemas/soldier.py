@@ -8,10 +8,8 @@ class SoldierBase(BaseModel):
     role: str = Field(default="rifleman", max_length=50)
 
 
-class SoldierCreate(BaseModel):
+class SoldierCreate(SoldierBase):
     id: str = Field(..., pattern=r"^\d{7}$", description="Exactly 7-digit military ID")
-    name: str = Field(..., min_length=2, max_length=100)
-    role: str = Field(default="rifleman", max_length=50)
     squad_id: UUID | None = None
 
 

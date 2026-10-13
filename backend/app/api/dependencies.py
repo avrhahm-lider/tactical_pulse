@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+import jwt
 from fastapi import Depends, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -26,7 +27,7 @@ async def get_current_user(
         if not user_id_str or token_type != "access":
             raise ValueError("Invalid access token type or missing subject")
         user_id = UUID(user_id_str)
-    except Exception:
+    except (jwt.PyJWTError, ValueError):
         raise AppException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             code="UNAUTHORIZED",
