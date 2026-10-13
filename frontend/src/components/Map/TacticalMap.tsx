@@ -5,7 +5,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { api } from '../../services/api'
 import type { Squad, Threat, User } from '../../types'
 import { Crosshair, Maximize2 } from 'lucide-react'
-import { getDroneSvgString, getOtherThreatSvgString } from '../Common/DroneIcon'
+import { getDroneSvgString, getOtherThreatSvgString } from '../../utils/svgIcons'
 
 // Leaflet default icon fix
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl
@@ -491,13 +491,16 @@ export const TacticalMap: React.FC = () => {
 
     mapInstanceRef.current = map
 
+    const squadMarkers = squadMarkersRef.current
+    const threatMarkers = threatMarkersRef.current
+
     return () => {
       threatVectorsLayerRef.current?.remove()
       map.remove()
       mapInstanceRef.current = null
       svgRendererRef.current = null
-      squadMarkersRef.current.clear()
-      threatMarkersRef.current.clear()
+      squadMarkers.clear()
+      threatMarkers.clear()
     }
   }, [])
  
@@ -827,14 +830,7 @@ export const TacticalMap: React.FC = () => {
       const isMe = user?.id === squad.id
       const stale = isStale(squad.updated_at)
 
-      // Styling based on role
-      let baseColor = isSapper ? '#f59e0b' : '#10b981'
-      let roleLabel = isSapper ? 'SAPPER' : 'SQUAD'
-
-      if (stale) {
-        baseColor = '#6b7280' // Grey for stale signal
-        roleLabel += ' (STALE)'
-      }
+      const baseColor = stale ? '#6b7280' : isSapper ? '#f59e0b' : '#10b981'
 
       // Icon HTML
       const iconWidth = 36

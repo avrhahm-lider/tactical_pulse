@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import {
   X,
   MapPin,
@@ -33,12 +33,12 @@ export const OperationsDrawer: React.FC<OperationsDrawerProps> = ({
   const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState<'live' | 'alerts'>(initialTab)
   const [selectedSquad, setSelectedSquad] = useState<Squad | null>(null)
+  const [prevTab, setPrevTab] = useState(initialTab)
 
-  useEffect(() => {
-    if (initialTab) {
-      setActiveTab(initialTab)
-    }
-  }, [initialTab, isOpen])
+  if (initialTab !== prevTab) {
+    setPrevTab(initialTab)
+    setActiveTab(initialTab)
+  }
 
   const allSquadsList = Object.values(squads)
   const rosterList = allSquadsList.filter((sq) => sq.status === 'active')

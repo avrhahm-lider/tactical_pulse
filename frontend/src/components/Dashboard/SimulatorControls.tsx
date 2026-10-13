@@ -83,18 +83,15 @@ export const SimulatorControls: React.FC = () => {
     (t) => t.threat_type === 'drone' && t.status === 'active'
   )
 
-  // Auto-select first squad / drone when list loads
-  useEffect(() => {
-    if (!selectedSquadId && combatSquads.length > 0) {
-      setSelectedSquadId(combatSquads[0].id)
-    }
-  }, [combatSquads, selectedSquadId])
+  const activeSquadId =
+    selectedSquadId && combatSquads.some((s) => s.id === selectedSquadId)
+      ? selectedSquadId
+      : combatSquads[0]?.id || ''
 
-  useEffect(() => {
-    if (!selectedDroneId && droneThreats.length > 0) {
-      setSelectedDroneId(droneThreats[0].id)
-    }
-  }, [droneThreats, selectedDroneId])
+  const activeDroneId =
+    selectedDroneId && droneThreats.some((d) => d.id === selectedDroneId)
+      ? selectedDroneId
+      : droneThreats[0]?.id || ''
 
   // Rewire "MASTER SIMULATION" Button to backend REST API
   const handleToggleMaster = async () => {
@@ -396,7 +393,7 @@ export const SimulatorControls: React.FC = () => {
   // 2. RADAR STATIONS VIEW (Radar)
   // -------------------------------------------------------------
   if (role === 'Radar') {
-    const curDrone = droneThreats.find((d) => d.id === selectedDroneId)
+    const curDrone = droneThreats.find((d) => d.id === activeDroneId)
     const isDroneLive = isSimulatorRunning && (simMode === 'drones' || simMode === 'all')
 
     return (
@@ -437,7 +434,7 @@ export const SimulatorControls: React.FC = () => {
                 <div className="text-slate-500 text-[11px] py-1">No active drones detected.</div>
               ) : (
                 <select
-                  value={selectedDroneId}
+                  value={activeDroneId}
                   onChange={(e) => setSelectedDroneId(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-white font-mono text-xs focus:border-sky-500 focus:outline-none"
                 >
@@ -467,7 +464,7 @@ export const SimulatorControls: React.FC = () => {
                   <div className="grid grid-cols-3 gap-1 w-24">
                     <div></div>
                     <button
-                      onClick={() => simulationEngine.stepDrone(selectedDroneId, 'north')}
+                      onClick={() => simulationEngine.stepDrone(activeDroneId, 'north')}
                       title="North"
                       className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
@@ -476,7 +473,7 @@ export const SimulatorControls: React.FC = () => {
                     <div></div>
 
                     <button
-                      onClick={() => simulationEngine.stepDrone(selectedDroneId, 'west')}
+                      onClick={() => simulationEngine.stepDrone(activeDroneId, 'west')}
                       title="West"
                       className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
@@ -486,7 +483,7 @@ export const SimulatorControls: React.FC = () => {
                       UAV
                     </div>
                     <button
-                      onClick={() => simulationEngine.stepDrone(selectedDroneId, 'east')}
+                      onClick={() => simulationEngine.stepDrone(activeDroneId, 'east')}
                       title="East"
                       className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
@@ -495,7 +492,7 @@ export const SimulatorControls: React.FC = () => {
 
                     <div></div>
                     <button
-                      onClick={() => simulationEngine.stepDrone(selectedDroneId, 'south')}
+                      onClick={() => simulationEngine.stepDrone(activeDroneId, 'south')}
                       title="South"
                       className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
@@ -507,13 +504,13 @@ export const SimulatorControls: React.FC = () => {
                   {/* Altitude Up / Down */}
                   <div className="flex flex-col space-y-1.5">
                     <button
-                      onClick={() => simulationEngine.stepDrone(selectedDroneId, 'north', 50)}
+                      onClick={() => simulationEngine.stepDrone(activeDroneId, 'north', 50)}
                       className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-amber-900 border border-slate-700 text-amber-300 font-bold text-[10px] cursor-pointer"
                     >
                       +Alt 50m
                     </button>
                     <button
-                      onClick={() => simulationEngine.stepDrone(selectedDroneId, 'south', -50)}
+                      onClick={() => simulationEngine.stepDrone(activeDroneId, 'south', -50)}
                       className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-amber-900 border border-slate-700 text-amber-300 font-bold text-[10px] cursor-pointer"
                     >
                       -Alt 50m
@@ -566,10 +563,10 @@ export const SimulatorControls: React.FC = () => {
   // -------------------------------------------------------------
   // 3. MAIN COMMAND CENTER (Admin) & AREA COMMAND CENTER
   // -------------------------------------------------------------
-  const curSquad = combatSquads.find((s) => s.id === selectedSquadId)
+  const curSquad = combatSquads.find((s) => s.id === activeSquadId)
   const isSquadLive = isSimulatorRunning && (simMode === 'squads' || simMode === 'all')
 
-  const curDrone = droneThreats.find((d) => d.id === selectedDroneId)
+  const curDrone = droneThreats.find((d) => d.id === activeDroneId)
   const isDroneLive = isSimulatorRunning && (simMode === 'drones' || simMode === 'all')
 
   return (
@@ -668,7 +665,7 @@ export const SimulatorControls: React.FC = () => {
               <div>
                 <label className="text-[10px] text-slate-400 block mb-1">SELECT SQUAD:</label>
                 <select
-                  value={selectedSquadId}
+                  value={activeSquadId}
                   onChange={(e) => setSelectedSquadId(e.target.value)}
                   className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none"
                 >
@@ -693,7 +690,7 @@ export const SimulatorControls: React.FC = () => {
                   <div className="grid grid-cols-3 gap-1 w-24 mx-auto">
                     <div></div>
                     <button
-                      onClick={() => simulationEngine.stepSquad(selectedSquadId, 'up')}
+                      onClick={() => simulationEngine.stepSquad(activeSquadId, 'up')}
                       className="p-1.5 rounded bg-slate-800 hover:bg-cyan-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
                       <ArrowUp className="w-3 h-3" />
@@ -701,7 +698,7 @@ export const SimulatorControls: React.FC = () => {
                     <div></div>
 
                     <button
-                      onClick={() => simulationEngine.stepSquad(selectedSquadId, 'left')}
+                      onClick={() => simulationEngine.stepSquad(activeSquadId, 'left')}
                       className="p-1.5 rounded bg-slate-800 hover:bg-cyan-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
                       <ArrowLeft className="w-3 h-3" />
@@ -710,7 +707,7 @@ export const SimulatorControls: React.FC = () => {
                       STEP
                     </div>
                     <button
-                      onClick={() => simulationEngine.stepSquad(selectedSquadId, 'right')}
+                      onClick={() => simulationEngine.stepSquad(activeSquadId, 'right')}
                       className="p-1.5 rounded bg-slate-800 hover:bg-cyan-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
                       <ArrowRight className="w-3 h-3" />
@@ -718,7 +715,7 @@ export const SimulatorControls: React.FC = () => {
 
                     <div></div>
                     <button
-                      onClick={() => simulationEngine.stepSquad(selectedSquadId, 'down')}
+                      onClick={() => simulationEngine.stepSquad(activeSquadId, 'down')}
                       className="p-1.5 rounded bg-slate-800 hover:bg-cyan-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                     >
                       <ArrowDown className="w-3 h-3" />
@@ -762,7 +759,7 @@ export const SimulatorControls: React.FC = () => {
                   <div className="text-slate-500 text-[11px] py-1">No tracked drones.</div>
                 ) : (
                   <select
-                    value={selectedDroneId}
+                    value={activeDroneId}
                     onChange={(e) => setSelectedDroneId(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-white font-mono text-xs focus:border-cyan-500 focus:outline-none"
                   >
@@ -790,7 +787,7 @@ export const SimulatorControls: React.FC = () => {
                     <div className="grid grid-cols-3 gap-1 w-24">
                       <div></div>
                       <button
-                        onClick={() => simulationEngine.stepDrone(selectedDroneId, 'north')}
+                        onClick={() => simulationEngine.stepDrone(activeDroneId, 'north')}
                         className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                       >
                         <ArrowUp className="w-3 h-3" />
@@ -798,7 +795,7 @@ export const SimulatorControls: React.FC = () => {
                       <div></div>
 
                       <button
-                        onClick={() => simulationEngine.stepDrone(selectedDroneId, 'west')}
+                        onClick={() => simulationEngine.stepDrone(activeDroneId, 'west')}
                         className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                       >
                         <ArrowLeft className="w-3 h-3" />
@@ -807,7 +804,7 @@ export const SimulatorControls: React.FC = () => {
                         UAV
                       </div>
                       <button
-                        onClick={() => simulationEngine.stepDrone(selectedDroneId, 'east')}
+                        onClick={() => simulationEngine.stepDrone(activeDroneId, 'east')}
                         className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                       >
                         <ArrowRight className="w-3 h-3" />
@@ -815,7 +812,7 @@ export const SimulatorControls: React.FC = () => {
 
                       <div></div>
                       <button
-                        onClick={() => simulationEngine.stepDrone(selectedDroneId, 'south')}
+                        onClick={() => simulationEngine.stepDrone(activeDroneId, 'south')}
                         className="p-1.5 rounded bg-slate-800 hover:bg-sky-900 border border-slate-700 text-slate-200 flex justify-center cursor-pointer"
                       >
                         <ArrowDown className="w-3 h-3" />
@@ -825,13 +822,13 @@ export const SimulatorControls: React.FC = () => {
 
                     <div className="flex flex-col space-y-1.5">
                       <button
-                        onClick={() => simulationEngine.stepDrone(selectedDroneId, 'north', 50)}
+                        onClick={() => simulationEngine.stepDrone(activeDroneId, 'north', 50)}
                         className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-amber-900 border border-slate-700 text-amber-300 font-bold text-[10px] cursor-pointer"
                       >
                         +Alt 50m
                       </button>
                       <button
-                        onClick={() => simulationEngine.stepDrone(selectedDroneId, 'south', -50)}
+                        onClick={() => simulationEngine.stepDrone(activeDroneId, 'south', -50)}
                         className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-amber-900 border border-slate-700 text-amber-300 font-bold text-[10px] cursor-pointer"
                       >
                         -Alt 50m

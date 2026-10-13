@@ -27,9 +27,6 @@ from app.sockets.server import broadcast_threat_event
 router = APIRouter(prefix="/threats", tags=["Threats Management"])
 
 
-# =========================================================================
-# RBAC PERMISSION HELPERS
-# =========================================================================
 
 def _is_command_center(user: User) -> bool:
     return user.role in ("MainCommandCenter", "AreaCommandCenter")
@@ -84,9 +81,6 @@ def _validate_deactivate_permission(threat: Threat, user: User, is_field_unit: b
         )
 
 
-# =========================================================================
-# THREATS ENDPOINTS
-# =========================================================================
 
 @router.get("", response_model=list[ThreatResponse])
 async def list_threats(

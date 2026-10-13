@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   X,
   AlertTriangle,
@@ -32,26 +32,20 @@ export const ThreatModal: React.FC<ThreatModalProps> = ({ isOpen, onClose }) => 
   const [threatType, setThreatType] = useState<ThreatCategory>('explosive')
   const [severityLevel, setSeverityLevel] = useState<SeverityLevel>('high')
   const [radius, setRadius] = useState<number>(150)
-  const [lat, setLat] = useState<string>('32.0800')
-  const [lon, setLon] = useState<string>('34.7800')
+  const [lat, setLat] = useState(() => (pickedLocation ? pickedLocation.lat.toFixed(6) : '32.0800'))
+  const [lon, setLon] = useState(() => (pickedLocation ? pickedLocation.lon.toFixed(6) : '34.7800'))
   const [altitude, setAltitude] = useState<string>('')
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  // Retrieve current user's attached soldier roster
   const unitSoldiers = user?.soldiers || (user?.id ? squads[user.id]?.soldiers : []) || []
   const defaultSoldierId = user?.soldier_id || user?.soldier?.id || unitSoldiers[0]?.id || ''
   const [reportingSoldierId, setReportingSoldierId] = useState<string>(defaultSoldierId)
 
+  const lastPickedRef = useRef(pickedLocation)
   useEffect(() => {
-    if (!reportingSoldierId && defaultSoldierId) {
-      setReportingSoldierId(defaultSoldierId)
-    }
-  }, [defaultSoldierId, reportingSoldierId])
-
-  // Update coordinates when picked from map
-  useEffect(() => {
-    if (pickedLocation) {
+    if (pickedLocation && pickedLocation !== lastPickedRef.current) {
+      lastPickedRef.current = pickedLocation
       setLat(pickedLocation.lat.toFixed(6))
       setLon(pickedLocation.lon.toFixed(6))
     }

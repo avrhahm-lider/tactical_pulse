@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   X,
   UserPlus,
@@ -90,10 +90,25 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   const [unlinkedSoldiers, setUnlinkedSoldiers] = useState<Soldier[]>([])
   const [existingUsers, setExistingUsers] = useState<any[]>([])
   const [isLoadingSoldiers, setIsLoadingSoldiers] = useState(false)
-  const [customForces, setCustomForces] = useState<CustomForce[]>([])
+  const [customForces, setCustomForces] = useState<CustomForce[]>(() => {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_CUSTOM_FORCES_KEY)
+      return stored ? JSON.parse(stored) : []
+    } catch {
+      return []
+    }
+  })
 
-  // Fetch unlinked soldiers and existing users
-  const fetchRegistryData = async () => {
+  const [prevRegTab, setPrevRegTab] = useState(registrationModalTab)
+  if (registrationModalTab !== prevRegTab) {
+    setPrevRegTab(registrationModalTab)
+    if (registrationModalTab) {
+      setActiveTab(registrationModalTab)
+    }
+  }
+
+  const fetchRegistryData = useCallback(async () => {
+    await Promise.resolve()
     setIsLoadingSoldiers(true)
     try {
       const [soldiers, users] = await Promise.all([
@@ -102,38 +117,21 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       ])
       setUnlinkedSoldiers(soldiers || [])
       setExistingUsers(users || [])
-      if (soldiers && soldiers.length > 0 && !selectedSoldierId) {
-        setSelectedSoldierId(soldiers[0].id)
+      if (soldiers && soldiers.length > 0) {
+        setSelectedSoldierId((prev) => prev || soldiers[0].id)
       }
     } catch (err) {
       console.error('Failed to load registry data:', err)
     } finally {
       setIsLoadingSoldiers(false)
     }
-  }
+  }, [])
 
-  // Load persistence, existing users and unlinked soldiers when modal opens
   useEffect(() => {
     if (isOpen) {
-      if (registrationModalTab) {
-        setActiveTab(registrationModalTab)
-      }
-      setErrorMessage(null)
-      setSuccessMessage(null)
-
-      // Load custom forces
-      try {
-        const storedForces = localStorage.getItem(LOCAL_STORAGE_CUSTOM_FORCES_KEY)
-        if (storedForces) {
-          setCustomForces(JSON.parse(storedForces))
-        }
-      } catch (e) {
-        console.error('Failed to load custom forces:', e)
-      }
-
-      fetchRegistryData()
+      void fetchRegistryData()
     }
-  }, [isOpen, registrationModalTab])
+  }, [isOpen, fetchRegistryData])
 
   // Generate 7-digit ID helper
   const handleGenerateSoldierId = () => {
@@ -235,15 +233,12 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     return list
   }, [customForces, squads])
 
-  // Set default team / HQ selections
-  useEffect(() => {
-    if (availableTeams.length > 0 && (!selectedTeamId || !availableTeams.some((t) => t.id === selectedTeamId))) {
-      setSelectedTeamId(availableTeams[0].id)
-    }
-    if (allRegionalHQs.length > 0 && !selectedRegionalHQId) {
-      setSelectedRegionalHQId(allRegionalHQs[0].id)
-    }
-  }, [availableTeams, allRegionalHQs, selectedTeamId, selectedRegionalHQId])
+  const effectiveTeamId =
+    selectedTeamId && availableTeams.some((t) => t.id === selectedTeamId)
+      ? selectedTeamId
+      : availableTeams[0]?.id || ''
+
+  const effectiveRegionalHQId = selectedRegionalHQId || allRegionalHQs[0]?.id || ''
 
   // -------------------------------------------------------------
   // SUBMISSION LOGIC
@@ -428,11 +423,11 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
 
     // Role-specific validation
     if (userType === 'Field Team') {
-      if (!selectedTeamId) {
+      if (!effectiveTeamId) {
         setErrorMessage('You must select a specific team from the available unassigned ones.')
         return
       }
-      const selectedTeam = availableTeams.find((t) => t.id === selectedTeamId)
+      const selectedTeam = availableTeams.find((t) => t.id === effectiveTeamId)
       if (!selectedTeam) {
         setErrorMessage('This field team already has an assigned user account. Each field team can only have 1 account.')
         return
@@ -442,7 +437,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         setErrorMessage('You must specify the soldier linked to the Regional HQ user account.')
         return
       }
-      if (!selectedRegionalHQId) {
+      if (!effectiveRegionalHQId) {
         setErrorMessage('You must select the Regional Headquarters to which this user is assigned.')
         return
       }
@@ -465,7 +460,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       const linkedSoldier = unlinkedSoldiers.find((s) => s.id === selectedSoldierId)
 
       if (userType === 'Field Team') {
-        const selectedTeam = availableTeams.find((t) => t.id === selectedTeamId)
+        const selectedTeam = availableTeams.find((t) => t.id === effectiveTeamId)
         backendRole = 'Squad'
         backendArea = 'Center'
         displayName = selectedTeam ? selectedTeam.name : `Field Team - ${username.trim()}`
@@ -473,7 +468,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         defaultLon = 34.7818
         // No soldier link for Field Team
       } else if (userType === 'Regional HQ') {
-        const selectedHQ = allRegionalHQs.find((h) => h.id === selectedRegionalHQId)
+        const selectedHQ = allRegionalHQs.find((h) => h.id === effectiveRegionalHQId)
         backendRole = 'AreaCommandCenter'
         backendArea = selectedHQ ? selectedHQ.area : 'Center'
         displayName = linkedSoldier
@@ -927,7 +922,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                   ) : (
                     <select
                       required
-                      value={selectedTeamId}
+                      value={effectiveTeamId}
                       onChange={(e) => setSelectedTeamId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-emerald-600 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
                     >
@@ -959,7 +954,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                     </label>
                     <select
                       required
-                      value={selectedRegionalHQId}
+                      value={effectiveRegionalHQId}
                       onChange={(e) => setSelectedRegionalHQId(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-indigo-500 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
                     >

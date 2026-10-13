@@ -30,18 +30,11 @@ from app.services.spatial import calculate_area_from_lat
 from app.sockets.server import (
     broadcast_unit_status_changed,
     disconnect_user_sockets,
-    sio,
 )
 
 router = APIRouter(prefix="/admin", tags=["Administration"])
 
-
 RE_SOLDIER_ID = re.compile(r"^\d{7}$")
-
-
-# =========================================================================
-# HELPERS
-# =========================================================================
 
 
 def _mask_confidential_coords(
@@ -141,9 +134,6 @@ async def _generate_unique_soldier_id(session: AsyncSession) -> str:
     )
 
 
-# =========================================================================
-# SOLDIERS MANAGEMENT
-# =========================================================================
 
 
 @router.get("/soldiers", response_model=list[SoldierResponse])
@@ -333,9 +323,6 @@ async def delete_soldier(
     return MessageResponse(message=f"Soldier '{soldier_id}' deleted successfully")
 
 
-# =========================================================================
-# USERS MANAGEMENT
-# =========================================================================
 
 
 @router.get("/users", response_model=list[AdminUserResponse])
@@ -867,7 +854,7 @@ async def delete_user(
     )
     await session.commit()
 
-    # 7. Broadcast WebSocket event to all clients to remove this unit
-    await sio.emit("unit_status_changed", {"id": str(user_id), "status": "deleted"})
+    # Broadcast WebSocket event to all clients to remove this unit
+    await broadcast_unit_status_changed(str(user_id), "deleted")
 
     return MessageResponse(message=f"User '{username}' deleted successfully")

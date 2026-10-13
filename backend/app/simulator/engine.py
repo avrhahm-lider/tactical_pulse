@@ -22,11 +22,9 @@ from app.sockets.server import (
     broadcast_to_visibility_range,
 )
 
-# ==============================================================================
-# TACTICAL SCENARIO DEFINITION (PRESENTATION GRADE)
-# ==============================================================================
+# Tactical Scenario Definitions
 
-# 1. Static Ground Threats (Minefields, Ambush Points with red danger zones)
+# Static ground threats
 GROUND_THREATS = [
     {
         "name": "Hostile Ambush Alpha",
@@ -50,45 +48,43 @@ GROUND_THREATS = [
     },
 ]
 
-# 2. Dynamic UAV / Drone Patrol Trajectories (High-speed aerial sweeps)
+# Dynamic UAV / Drone patrol trajectories
 DRONE_CONFIGS = [
     {
         "name": "Hostile Recon UAV Alpha",
         "severity": "critical",
         "radius": 180.0,
-        "speed_kmh": 100.0,  # 100 km/h: ~6.94m per 250ms tick
-        # Pattern 1: Wide Elliptical Reconnaissance Orbit (Овал)
+        "speed_kmh": 100.0,
         "key_points": [
-            (32.0880, 34.7830, 380.0),  # SW apex (Start & Finish)
-            (32.0960, 34.7840, 410.0),  # NW arc
-            (32.1020, 34.7930, 440.0),  # North apex
-            (32.1000, 34.8040, 420.0),  # NE arc
-            (32.0920, 34.8030, 390.0),  # SE arc
-            (32.0860, 34.7940, 380.0),  # South arc
-            (32.0880, 34.7830, 380.0),  # Return to SW apex
+            (32.0880, 34.7830, 380.0),
+            (32.0960, 34.7840, 410.0),
+            (32.1020, 34.7930, 440.0),
+            (32.1000, 34.8040, 420.0),
+            (32.0920, 34.8030, 390.0),
+            (32.0860, 34.7940, 380.0),
+            (32.0880, 34.7830, 380.0),
         ],
     },
     {
         "name": "Kamikaze Drone Bravo",
         "severity": "high",
         "radius": 160.0,
-        "speed_kmh": 60.0,  # 60 km/h: ~4.17m per 250ms tick
-        # Pattern 2: Figure-8 / Infinity Lemniscate Loop (Восьмёрка)
+        "speed_kmh": 60.0,
         "key_points": [
-            (32.0950, 34.7960, 250.0),  # Central crossover (Start & Finish)
-            (32.0990, 34.7910, 280.0),  # West lobe top
-            (32.0970, 34.7860, 260.0),  # West lobe apex
-            (32.0920, 34.7890, 230.0),  # West lobe bottom
-            (32.0950, 34.7960, 250.0),  # Central crossover
-            (32.0910, 34.8030, 220.0),  # East lobe bottom
-            (32.0940, 34.8080, 240.0),  # East lobe apex
-            (32.0980, 34.8040, 270.0),  # East lobe top
-            (32.0950, 34.7960, 250.0),  # Return to central crossover
+            (32.0950, 34.7960, 250.0),
+            (32.0990, 34.7910, 280.0),
+            (32.0970, 34.7860, 260.0),
+            (32.0920, 34.7890, 230.0),
+            (32.0950, 34.7960, 250.0),
+            (32.0910, 34.8030, 220.0),
+            (32.0940, 34.8080, 240.0),
+            (32.0980, 34.8040, 270.0),
+            (32.0950, 34.7960, 250.0),
         ],
     },
 ]
 
-# 3. Ground Combat Squads (Realistic patrol profiles & paces)
+# Ground combat squads
 SQUAD_CONFIGS = [
     {
         "username": "squad_golani",
@@ -96,20 +92,18 @@ SQUAD_CONFIGS = [
         "name": "Golani Recon Squad",
         "description": "Mobile motorized patrol (40 km/h)",
         "area": "Center",
-        "speed_kmh": 40.0,  # 40 km/h: ~2.78m per 250ms tick
+        "speed_kmh": 40.0,
         "start_point": (32.0850, 34.7880),
         "soldier_id": "1000001",
         "soldier_name": "David Cohen",
         "soldier_role": "commander",
-        # Pattern 3: Diamond / Rhombus Perimeter Circuit (Ромб)
-        # Enters Hostile Ambush Alpha (32.0915, 34.7875, r=220m) triggering tactical breach alerts
         "route": [
-            (32.0850, 34.7880),  # South apex (Start & Finish)
-            (32.0920, 34.7820),  # West apex
-            (32.0915, 34.7875),  # INTRUSION: Penetrates Hostile Ambush Alpha perimeter!
-            (32.0990, 34.7880),  # North apex
-            (32.0920, 34.7940),  # East apex
-            (32.0850, 34.7880),  # Return to South apex
+            (32.0850, 34.7880),
+            (32.0920, 34.7820),
+            (32.0915, 34.7875),
+            (32.0990, 34.7880),
+            (32.0920, 34.7940),
+            (32.0850, 34.7880),
         ],
     },
     {
@@ -118,22 +112,20 @@ SQUAD_CONFIGS = [
         "name": "Paratroopers Sapper Squad",
         "description": "Tactical EOD foot patrol (8 km/h)",
         "area": "Center",
-        "speed_kmh": 8.0,  # 8 km/h: ~0.56m per 250ms tick
+        "speed_kmh": 8.0,
         "start_point": (32.0920, 34.7920),
         "soldier_id": "2000001",
         "soldier_name": "Ariel Mizrahi",
         "soldier_role": "commander",
-        # Pattern 4: Tactical Zig-Zag / Staircase Grid Sweep (Зигзаг / Ступенчатый сапёрный обход)
-        # Penetrates Minefield Perimeter Bravo (32.0955, 34.7965, r=200m) for minefield reconnaissance
         "route": [
-            (32.0920, 34.7920),  # Sector entry (Start & Finish)
-            (32.0950, 34.7920),  # North step 1
-            (32.0955, 34.7965),  # INTRUSION: Penetrates Minefield Perimeter Bravo!
-            (32.0980, 34.7965),  # North step 2 (minefield sweep)
-            (32.0980, 34.8010),  # East flank step
-            (32.0940, 34.8010),  # South flank step
-            (32.0940, 34.7960),  # West clearance step
-            (32.0920, 34.7920),  # Return to sector entry
+            (32.0920, 34.7920),
+            (32.0950, 34.7920),
+            (32.0955, 34.7965),
+            (32.0980, 34.7965),
+            (32.0980, 34.8010),
+            (32.0940, 34.8010),
+            (32.0940, 34.7960),
+            (32.0920, 34.7920),
         ],
     },
 ]
@@ -187,10 +179,6 @@ def calculate_heading(lat1: float, lon1: float, lat2: float, lon2: float) -> flo
     bearing = math.degrees(math.atan2(y, x))
     return round((bearing + 360) % 360, 1)
 
-
-# ==============================================================================
-# SIMULATION ENGINE CORE
-# ==============================================================================
 
 class SimulatorEngine:
     def __init__(self):

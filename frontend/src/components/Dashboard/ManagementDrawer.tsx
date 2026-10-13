@@ -73,16 +73,15 @@ export const ManagementDrawer: React.FC<ManagementDrawerProps> = ({
   const [assigningToSquadId, setAssigningToSquadId] = useState<string | null>(null)
   const [selectedSoldierToAssign, setSelectedSoldierToAssign] = useState<string>('')
 
-  // Sync tab when initialTab changes
-  useEffect(() => {
-    if (initialTab) {
-      setActiveTab(initialTab)
-    }
-  }, [initialTab, isOpen])
+  const [prevTab, setPrevTab] = useState(initialTab)
+  if (initialTab !== prevTab) {
+    setPrevTab(initialTab)
+    setActiveTab(initialTab)
+  }
 
-  // Fetch data on open or tab change
   const refreshData = React.useCallback(async () => {
     if (!isOpen) return
+    await Promise.resolve()
     setIsLoading(true)
     try {
       const [users, soldiers, unlinked, unassigned] = await Promise.all([

@@ -182,8 +182,8 @@ export const api = {
       const res = await apiClient.patch<Soldier>(`/admin/soldiers/${soldierId}`, payload)
       return res.data
     },
-    deleteSoldier: async (soldierId: string): Promise<any> => {
-      const res = await apiClient.delete(`/admin/soldiers/${soldierId}`)
+    deleteSoldier: async (soldierId: string): Promise<{ message: string }> => {
+      const res = await apiClient.delete<{ message: string }>(`/admin/soldiers/${soldierId}`)
       return res.data
     },
   },
