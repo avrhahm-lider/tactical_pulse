@@ -12,20 +12,18 @@ import { getActiveTransmittingCount, getOnlineRosterCount } from '../../utils/sq
 
 interface HeaderProps {
   onOpenCreateThreat: () => void
-  onToggleUnitDrawer: () => void
-  isUnitDrawerOpen: boolean
-  onOpenLiveUnitsList?: () => void
-  onOpenRosterList?: () => void
-  onOpenAlertsList?: () => void
+  onOpenLiveList: () => void
+  onOpenAlertsList: () => void
+  onToggleManagementDrawer: () => void
+  isManagementDrawerOpen: boolean
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenCreateThreat,
-  onToggleUnitDrawer,
-  isUnitDrawerOpen,
-  onOpenLiveUnitsList,
-  onOpenRosterList,
+  onOpenLiveList,
   onOpenAlertsList,
+  onToggleManagementDrawer,
+  isManagementDrawerOpen,
 }) => {
   const { user, logout } = useAuthStore()
   const {
@@ -78,20 +76,20 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Live Indicators (Icon + Number only, Clickable, Framed with Solid Background) */}
         <div className="flex items-center space-x-3 pl-4 border-l border-slate-800">
-          {/* Live Indicator (Green) -> Click opens live session active forces list */}
+          {/* Live Indicator (Green) -> Click opens left operations drawer on Live tab */}
           <button
-            onClick={onOpenLiveUnitsList || onToggleUnitDrawer}
-            title="Live Active Session (Click to view live transmitting forces)"
+            onClick={onOpenLiveList}
+            title="Live Active Operations (Click to view live transmitting units on the left)"
             className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/90 hover:bg-emerald-900/90 border border-emerald-600/80 text-emerald-300 font-mono text-xs transition-all shadow-sm shadow-emerald-950/50 cursor-pointer shrink-0"
           >
             <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
             <span className="font-bold text-emerald-300 leading-none">{liveCount}</span>
           </button>
 
-          {/* Alert Indicator (Red) -> Click opens active alerts list (Frame contained, no text spilling) */}
+          {/* Alert Indicator (Red) -> Click opens left operations drawer on Alerts tab */}
           <button
-            onClick={onOpenAlertsList || onToggleUnitDrawer}
-            title="Active Tactical Alerts (Click to view Alerts list)"
+            onClick={onOpenAlertsList}
+            title="Active Tactical Alerts (Click to view Alerts list on the left)"
             className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-red-950/95 hover:bg-red-900/95 border border-red-600/90 text-red-300 font-mono text-xs transition-all shadow-sm shadow-red-950/60 cursor-pointer shrink-0"
           >
             <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
@@ -111,18 +109,18 @@ export const Header: React.FC<HeaderProps> = ({
           <span>OPEN ALERT</span>
         </button>
 
-        {/* Toggle Unit Drawer / Roster */}
+        {/* Toggle Management / Administration Drawer (Opens on the Right) */}
         <button
-          onClick={onOpenRosterList || onToggleUnitDrawer}
-          title="Operational Roster (Click to view all online users and forces)"
+          onClick={onToggleManagementDrawer}
+          title="Operational Management (Users, Forces, Soldiers)"
           className={`px-3.5 py-2 rounded-lg font-mono text-xs font-semibold tracking-wider flex items-center space-x-2 border transition-all cursor-pointer ${
-            isUnitDrawerOpen
-              ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300'
+            isManagementDrawerOpen
+              ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-md shadow-cyan-950/40'
               : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-300'
           }`}
         >
           <Users className="w-4 h-4 text-cyan-400" />
-          <span>ROSTER ({rosterCount})</span>
+          <span>MANAGEMENT ({rosterCount})</span>
         </button>
 
         {/* User Badge */}

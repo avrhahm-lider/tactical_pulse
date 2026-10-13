@@ -35,7 +35,6 @@ interface CustomForce {
   lon?: number
 }
 
-const LOCAL_STORAGE_ASSIGNED_TEAMS_KEY = 'tactical_assigned_team_ids'
 const LOCAL_STORAGE_CUSTOM_FORCES_KEY = 'tactical_custom_forces'
 
 export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
@@ -89,11 +88,11 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
 
   // Registry data
   const [unlinkedSoldiers, setUnlinkedSoldiers] = useState<Soldier[]>([])
+  const [existingUsers, setExistingUsers] = useState<any[]>([])
   const [isLoadingSoldiers, setIsLoadingSoldiers] = useState(false)
-  const [assignedTeamIds, setAssignedTeamIds] = useState<string[]>([])
   const [customForces, setCustomForces] = useState<CustomForce[]>([])
 
-  // Load persistence and unlinked soldiers when modal opens
+  // Load persistence, existing users and unlinked soldiers when modal opens
   useEffect(() => {
     if (isOpen) {
       if (registrationModalTab) {
@@ -101,16 +100,6 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       }
       setErrorMessage(null)
       setSuccessMessage(null)
-
-      // Load assigned team IDs
-      try {
-        const storedAssigned = localStorage.getItem(LOCAL_STORAGE_ASSIGNED_TEAMS_KEY)
-        if (storedAssigned) {
-          setAssignedTeamIds(JSON.parse(storedAssigned))
-        }
-      } catch (e) {
-        console.error('Failed to load assigned teams:', e)
-      }
 
       // Load custom forces
       try {
@@ -122,21 +111,25 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         console.error('Failed to load custom forces:', e)
       }
 
-      fetchUnlinkedSoldiers()
+      fetchRegistryData()
     }
   }, [isOpen, registrationModalTab])
 
-  // Fetch unlinked soldiers
-  const fetchUnlinkedSoldiers = async () => {
+  // Fetch unlinked soldiers and existing users
+  const fetchRegistryData = async () => {
     setIsLoadingSoldiers(true)
     try {
-      const soldiers = await api.admin.getUnlinkedSoldiers()
+      const [soldiers, users] = await Promise.all([
+        api.admin.getUnlinkedSoldiers().catch(() => []),
+        api.admin.getUsers().catch(() => []),
+      ])
       setUnlinkedSoldiers(soldiers || [])
+      setExistingUsers(users || [])
       if (soldiers && soldiers.length > 0 && !selectedSoldierId) {
         setSelectedSoldierId(soldiers[0].id)
       }
     } catch (err) {
-      console.error('Failed to load unlinked soldiers:', err)
+      console.error('Failed to load registry data:', err)
     } finally {
       setIsLoadingSoldiers(false)
     }
@@ -155,7 +148,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     setErrorMessage(null)
     setSuccessMessage(null)
     if (tab === 'user') {
-      fetchUnlinkedSoldiers()
+      fetchRegistryData()
     }
   }
 
@@ -163,30 +156,63 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   // COMPUTED LISTS FOR TAB 3
   // -------------------------------------------------------------
 
-  // 1. All existing teams (from squads store + custom forces of type Field Force)
-  const allFieldTeams: { id: string; name: string; description?: string }[] = []
-  const seenTeamIds = new Set<string>()
+  // Teams that ALREADY have an assigned user account
+  const assignedTeamNames = new Set(
+    existingUsers
+      .filter((u) => u.role === 'Squad' || u.role === 'SapperSquad')
+      .map((u) => u.name.trim().toLowerCase())
+  )
+  const assignedUserIds = new Set(
+    existingUsers
+      .filter((u) => u.role === 'Squad' || u.role === 'SapperSquad')
+      .map((u) => u.id)
+  )
 
-  // From map squads:
+  // Standard military squads catalog + map squads + custom forces
+  const standardFieldUnits = [
+    { id: 'unit_golani', name: 'Golani Recon Squad', description: 'Elite forward reconnaissance patrol' },
+    { id: 'unit_paratroopers', name: 'Paratroopers Sapper Squad', description: 'Combat engineering & EOD assault unit' },
+    { id: 'unit_givati', name: 'Givati Infantry Patrol', description: 'Southern theater reconnaissance force' },
+    { id: 'unit_maglan', name: 'Maglan Commando Team', description: 'Long-range special reconnaissance' },
+    { id: 'unit_yahalom', name: 'Yahalom EOD Assault Unit', description: 'Special engineering and counter-explosives' },
+    { id: 'unit_egoz', name: 'Egoz Special Recon', description: 'Northern sector counter-guerrilla force' },
+    { id: 'unit_duvdevan', name: 'Duvdevan Tactical Team', description: 'Urban counter-terror tactical unit' },
+    { id: 'unit_shaldag', name: 'Shaldag Forward Unit', description: 'Special operations forward air controller unit' },
+    { id: 'unit_caracal', name: 'Caracal Border Patrol', description: 'Southern border reconnaissance battalion' },
+    { id: 'unit_nahal', name: 'Nahal Infantry Squad', description: 'Quick reaction infantry detachment' },
+  ]
+
+  const allFieldTeams: { id: string; name: string; description?: string }[] = []
+  const seenTeamNames = new Set<string>()
+
+  // 1. From standard catalog
+  standardFieldUnits.forEach((u) => {
+    seenTeamNames.add(u.name.toLowerCase())
+    allFieldTeams.push(u)
+  })
+
+  // 2. From map squads:
   Object.values(squads).forEach((sq: Squad) => {
     if (sq.role === 'Squad' || sq.role === 'SapperSquad') {
-      if (!seenTeamIds.has(sq.id)) {
-        seenTeamIds.add(sq.id)
+      if (!seenTeamNames.has(sq.name.toLowerCase())) {
+        seenTeamNames.add(sq.name.toLowerCase())
         allFieldTeams.push({ id: sq.id, name: sq.name, description: sq.description })
       }
     }
   })
 
-  // From custom forces:
+  // 3. From custom forces:
   customForces.forEach((cf) => {
-    if (cf.type === 'Field Force' && !seenTeamIds.has(cf.id)) {
-      seenTeamIds.add(cf.id)
+    if (cf.type === 'Field Force' && !seenTeamNames.has(cf.name.toLowerCase())) {
+      seenTeamNames.add(cf.name.toLowerCase())
       allFieldTeams.push({ id: cf.id, name: cf.name, description: cf.description })
     }
   })
 
-  // Filter out teams that already have been assigned a username and password
-  const availableTeams = allFieldTeams.filter((team) => !assignedTeamIds.includes(team.id))
+  // STRICT RULE: Only show squads that DO NOT currently have an assigned user account!
+  const availableTeams = allFieldTeams.filter((team) => {
+    return !assignedTeamNames.has(team.name.toLowerCase()) && !assignedUserIds.has(team.id)
+  })
 
   // 2. All existing Regional Headquarters
   const allRegionalHQs: { id: string; name: string; area: Area }[] = [
@@ -214,7 +240,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
 
   // Set default team / HQ selections
   useEffect(() => {
-    if (availableTeams.length > 0 && !selectedTeamId) {
+    if (availableTeams.length > 0 && (!selectedTeamId || !availableTeams.some((t) => t.id === selectedTeamId))) {
       setSelectedTeamId(availableTeams[0].id)
     }
     if (allRegionalHQs.length > 0 && !selectedRegionalHQId) {
@@ -255,7 +281,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       setSoldierName('')
       setSoldierRole('Combat')
       await loadSnapshot()
-      await fetchUnlinkedSoldiers()
+      await fetchRegistryData()
 
       setTimeout(() => {
         setSuccessMessage(null)
@@ -406,11 +432,15 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     // Role-specific validation
     if (userType === 'Field Team') {
       if (!selectedTeamId) {
-        setErrorMessage('You must select a specific team from the existing ones.')
+        setErrorMessage('You must select a specific team from the available unassigned ones.')
         return
       }
-      if (assignedTeamIds.includes(selectedTeamId)) {
-        setErrorMessage('This team has already been assigned a user account and cannot be linked again.')
+      const selectedTeam = allFieldTeams.find((t) => t.id === selectedTeamId)
+      if (
+        (selectedTeam && assignedTeamNames.has(selectedTeam.name.toLowerCase())) ||
+        assignedUserIds.has(selectedTeamId)
+      ) {
+        setErrorMessage('This field team already has an assigned user account. Each field team can only have 1 account.')
         return
       }
     } else if (userType === 'Regional HQ') {
@@ -503,20 +533,13 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
 
       await api.admin.createUser(payload)
 
-      // If Field Team, record that this team has now been assigned credentials
-      if (userType === 'Field Team' && selectedTeamId) {
-        const newAssigned = [...assignedTeamIds, selectedTeamId]
-        setAssignedTeamIds(newAssigned)
-        localStorage.setItem(LOCAL_STORAGE_ASSIGNED_TEAMS_KEY, JSON.stringify(newAssigned))
-      }
-
       setSuccessMessage(`User account '${username.trim()}' (${userType}) successfully created!`)
       setUsername('')
       setPassword('')
       setSelectedSoldierId('')
       setSelectedTeamId('')
       await loadSnapshot()
-      await fetchUnlinkedSoldiers()
+      await fetchRegistryData()
 
       setTimeout(() => {
         setSuccessMessage(null)

@@ -8,7 +8,8 @@ import { TacticalMap } from './components/Map/TacticalMap'
 import { ThreatModal } from './components/Forms/ThreatModal'
 import { UserRegistrationModal } from './components/Forms/UserRegistrationModal'
 import { ThreatDetailModal } from './components/Dashboard/ThreatDetailModal'
-import { UnitListDrawer } from './components/Dashboard/UnitListDrawer'
+import { OperationsDrawer } from './components/Dashboard/OperationsDrawer'
+import { ManagementDrawer } from './components/Dashboard/ManagementDrawer'
 import { ProximityAlertBanner } from './components/Dashboard/ProximityAlertBanner'
 import { SimulatorControls } from './components/Dashboard/SimulatorControls'
 
@@ -25,8 +26,13 @@ export const App: React.FC = () => {
     setIsUserRegistrationModalOpen,
   } = useMapStore()
 
-  const [isUnitDrawerOpen, setIsUnitDrawerOpen] = useState(false)
-  const [drawerInitialTab, setDrawerInitialTab] = useState<'live' | 'roster' | 'alerts'>('roster')
+  // Left Drawer (Operations: Live & Alerts)
+  const [isLeftDrawerOpen, setIsLeftDrawerOpen] = useState(false)
+  const [leftDrawerTab, setLeftDrawerTab] = useState<'live' | 'alerts'>('live')
+
+  // Right Drawer (Management: Users, Forces, Soldiers)
+  const [isRightDrawerOpen, setIsRightDrawerOpen] = useState(false)
+  const [rightDrawerTab, setRightDrawerTab] = useState<'users' | 'forces' | 'soldiers'>('users')
 
   // Session rehydration on mount
   useEffect(() => {
@@ -71,20 +77,21 @@ export const App: React.FC = () => {
       {/* Top Tactical Command Header */}
       <Header
         onOpenCreateThreat={() => setIsThreatModalOpen(true)}
-        onToggleUnitDrawer={() => setIsUnitDrawerOpen((prev) => !prev)}
-        isUnitDrawerOpen={isUnitDrawerOpen}
-        onOpenLiveUnitsList={() => {
-          setDrawerInitialTab('live')
-          setIsUnitDrawerOpen(true)
-        }}
-        onOpenRosterList={() => {
-          setDrawerInitialTab('roster')
-          setIsUnitDrawerOpen(true)
+        onOpenLiveList={() => {
+          setLeftDrawerTab('live')
+          setIsLeftDrawerOpen(true)
         }}
         onOpenAlertsList={() => {
-          setDrawerInitialTab('alerts')
-          setIsUnitDrawerOpen(true)
+          setLeftDrawerTab('alerts')
+          setIsLeftDrawerOpen(true)
         }}
+        onToggleManagementDrawer={() => {
+          if (!isRightDrawerOpen) {
+            setRightDrawerTab(user?.role === 'MainCommandCenter' ? 'users' : 'forces')
+          }
+          setIsRightDrawerOpen((prev) => !prev)
+        }}
+        isManagementDrawerOpen={isRightDrawerOpen}
       />
 
       {/* Main Tactical Map View */}
@@ -97,11 +104,18 @@ export const App: React.FC = () => {
         {/* Simulator D-Pad for Field Units */}
         <SimulatorControls />
 
-        {/* Unit Roster Drawer */}
-        <UnitListDrawer
-          isOpen={isUnitDrawerOpen}
-          onClose={() => setIsUnitDrawerOpen(false)}
-          initialTab={drawerInitialTab}
+        {/* Operations Drawer (Left: Live Units & Alerts) */}
+        <OperationsDrawer
+          isOpen={isLeftDrawerOpen}
+          onClose={() => setIsLeftDrawerOpen(false)}
+          initialTab={leftDrawerTab}
+        />
+
+        {/* Operational Management Drawer (Right: Users, Forces, Soldiers) */}
+        <ManagementDrawer
+          isOpen={isRightDrawerOpen}
+          onClose={() => setIsRightDrawerOpen(false)}
+          initialTab={rightDrawerTab}
         />
 
         {/* Threat Creation Modal */}

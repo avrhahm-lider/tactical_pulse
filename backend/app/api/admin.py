@@ -380,6 +380,23 @@ async def create_user_or_unit(
     if req.soldiers and any((s.role or "").lower() == "sapper" for s in req.soldiers):
         assigned_role = "SapperSquad"
 
+    # Enforce strictly 1 account per field team
+    if assigned_role in ["Squad", "SapperSquad"]:
+        existing_squad = (
+            await session.execute(
+                select(User).where(
+                    User.name == req.name,
+                    User.role.in_(["Squad", "SapperSquad"]),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_squad:
+            raise AppException(
+                status_code=status.HTTP_409_CONFLICT,
+                code="CONFLICT",
+                message=f"Field team '{req.name}' already has an assigned user account. Each field team can only have 1 account.",
+            )
+
     # RBAC Linking Rules:
     # "Field Team" (Squad/SapperSquad) and "Radar" users are created without being linked to a specific soldier.
     # Other user types (MainCommandCenter, AreaCommandCenter) must be linked to a soldier.
@@ -551,30 +568,52 @@ async def update_user(
             message=f"User '{user_id}' not found",
         )
 
-    if req.soldier_id is not None and req.soldier_id != user.soldier_id:
-        soldier = (
-            await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))
-        ).scalar_one_or_none()
-        if not soldier:
-            raise AppException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                code="NOT_FOUND",
-                message=f"Soldier '{req.soldier_id}' not found",
-            )
-        linked = (
+    if "soldier_id" in req.model_dump(exclude_unset=True):
+        if not req.soldier_id:
+            user.soldier_id = None
+        elif req.soldier_id != user.soldier_id:
+            soldier = (
+                await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))
+            ).scalar_one_or_none()
+            if not soldier:
+                raise AppException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    code="NOT_FOUND",
+                    message=f"Soldier '{req.soldier_id}' not found",
+                )
+            linked = (
+                await session.execute(
+                    select(User).where(
+                        User.soldier_id == req.soldier_id, User.id != user_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if linked:
+                raise AppException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    code="CONFLICT",
+                    message=f"Soldier '{req.soldier_id}' is already linked to another user account",
+                )
+            user.soldier_id = req.soldier_id
+
+    effective_role = req.role if req.role is not None else user.role
+    effective_name = req.name if req.name is not None else user.name
+    if effective_role in ["Squad", "SapperSquad"] and (req.name is not None or req.role is not None):
+        existing_squad = (
             await session.execute(
                 select(User).where(
-                    User.soldier_id == req.soldier_id, User.id != user_id
+                    User.name == effective_name,
+                    User.role.in_(["Squad", "SapperSquad"]),
+                    User.id != user_id,
                 )
             )
         ).scalar_one_or_none()
-        if linked:
+        if existing_squad:
             raise AppException(
                 status_code=status.HTTP_409_CONFLICT,
                 code="CONFLICT",
-                message=f"Soldier '{req.soldier_id}' is already linked to another user account",
+                message=f"Field team '{effective_name}' already has an assigned user account. Each field team can only have 1 account.",
             )
-        user.soldier_id = req.soldier_id
 
     if req.name is not None:
         user.name = req.name

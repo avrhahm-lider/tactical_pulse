@@ -35,7 +35,7 @@ class UserUpdate(BaseModel):
     description: str | None = None
     role: UserRole | None = None
     area: UserArea | None = None
-    soldier_id: str | None = Field(None, pattern=r"^\d{7}$")
+    soldier_id: str | None = Field(None, pattern=r"^(\d{7})?$")
     password: str | None = Field(None, min_length=6)
     lat: float | None = Field(None, ge=29.0, le=34.0)
     lon: float | None = Field(None, ge=33.5, le=36.5)

@@ -132,6 +132,10 @@ export const api = {
       const res = await apiClient.post<User>('/admin/users', payload)
       return res.data
     },
+    updateUser: async (userId: string, payload: Record<string, unknown>): Promise<User> => {
+      const res = await apiClient.patch<User>(`/admin/users/${userId}`, payload)
+      return res.data
+    },
     updateStatus: async (userId: string, status: 'active' | 'inactive'): Promise<User> => {
       const res = await apiClient.patch<User>(`/admin/users/${userId}/status`, { status })
       return res.data
