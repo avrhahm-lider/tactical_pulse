@@ -380,6 +380,12 @@ export const TacticalMap: React.FC = () => {
   const squadMarkersRef = useRef<Map<string, L.Marker>>(new Map())
   const threatMarkersRef = useRef<Map<string, L.Marker>>(new Map())
   const svgRendererRef = useRef<L.SVG | null>(null)
+  const tileLayersRef = useRef<{
+    dark: L.TileLayer | null
+    satellite: L.TileLayer | null
+    osm: L.TileLayer | null
+  }>({ dark: null, satellite: null, osm: null })
+  const activeTileLayer = useMapStore((s) => s.activeTileLayer)
 
   // Auto-fit mode toggle & programmatic movement guard
   const [isAutoFitMode, setIsAutoFitMode] = useState<boolean>(false)
@@ -458,19 +464,20 @@ export const TacticalMap: React.FC = () => {
       }
     )
 
-    darkTiles.addTo(map)
+    tileLayersRef.current = {
+      dark: darkTiles,
+      satellite: satelliteTiles,
+      osm: osmTiles,
+    }
 
-    L.control
-      .layers(
-        {
-          'Tactical Dark': darkTiles,
-          'Satellite View': satelliteTiles,
-          'OpenStreetMap': osmTiles,
-        },
-        undefined,
-        { position: 'bottomleft' }
-      )
-      .addTo(map)
+    const initialLayer = useMapStore.getState().activeTileLayer
+    if (initialLayer === 'satellite') {
+      satelliteTiles.addTo(map)
+    } else if (initialLayer === 'osm') {
+      osmTiles.addTo(map)
+    } else {
+      darkTiles.addTo(map)
+    }
 
     L.control.zoom({ position: 'bottomright' }).addTo(map)
 
@@ -493,6 +500,25 @@ export const TacticalMap: React.FC = () => {
       threatMarkersRef.current.clear()
     }
   }, [])
+ 
+  // Switch active map tile layer dynamically
+  useEffect(() => {
+    const map = mapInstanceRef.current
+    const layers = tileLayersRef.current
+    if (!map || !layers.dark || !layers.satellite || !layers.osm) return
+
+    layers.dark.remove()
+    layers.satellite.remove()
+    layers.osm.remove()
+
+    if (activeTileLayer === 'satellite') {
+      layers.satellite.addTo(map)
+    } else if (activeTileLayer === 'osm') {
+      layers.osm.addTo(map)
+    } else {
+      layers.dark.addTo(map)
+    }
+  }, [activeTileLayer])
 
   // Handle Map Click: A threat is NOT added simply by clicking the map;
   // instead, one must first select "Open Alert" and choose the "Select from Map" option.

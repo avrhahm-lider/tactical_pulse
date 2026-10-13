@@ -33,6 +33,8 @@ interface MapState {
   isUserRegistrationModalOpen: boolean
   registrationModalTab: 'soldier' | 'force' | 'user'
   selectedZoneFilter: 'Global' | 'North' | 'Center' | 'South'
+  activeTileLayer: 'dark' | 'satellite' | 'osm'
+  setActiveTileLayer: (layer: 'dark' | 'satellite' | 'osm') => void
 
   loadSnapshot: () => Promise<void>
   updateSquadPosition: (payload: SquadMovedPayload, currentUserId?: string) => void
@@ -68,6 +70,8 @@ export const useMapStore = create<MapState>((set, get) => ({
   isUserRegistrationModalOpen: false,
   registrationModalTab: 'soldier',
   selectedZoneFilter: 'Global',
+  activeTileLayer: 'dark',
+  setActiveTileLayer: (layer) => set({ activeTileLayer: layer }),
 
   loadSnapshot: async () => {
     set({ isLoading: true, error: null })
