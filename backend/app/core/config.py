@@ -28,18 +28,26 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    CORS_ORIGINS: list[str] | str = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://tactical-pulse-git-dev-am500148148-8547.vercel.app",
+    ]
 
     @field_validator("CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Any) -> list[str]:
         if isinstance(v, str):
             stripped = v.strip()
+            if stripped == "*":
+                return ["*"]
             if stripped.startswith("[") and stripped.endswith("]"):
                 try:
-                    return json.loads(stripped)
+                    return [origin.strip().rstrip("/") for origin in json.loads(stripped)]
                 except json.JSONDecodeError:
                     pass
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
+            return [origin.strip().rstrip("/") for origin in v.split(",") if origin.strip()]
+        if isinstance(v, list):
+            return [origin.strip().rstrip("/") for origin in v if isinstance(origin, str)]
         return v
 
     # Tactical Theater Coordinates (Israel Theater)

@@ -22,7 +22,7 @@ from app.services.spatial import (
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins=settings.CORS_ORIGINS,
+    cors_allowed_origins="*",
     logger=False,
     engineio_logger=False,
 )
