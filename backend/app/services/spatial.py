@@ -2,17 +2,16 @@ import math
 from datetime import datetime
 from uuid import UUID
 
-from geoalchemy2 import Geography
-from geoalchemy2.elements import WKTElement
-from geoalchemy2.functions import ST_X, ST_Y, ST_DWithin, ST_MakePoint, ST_SetSRID
-from sqlalchemy import and_, cast, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.config import settings
 from app.db.postgres import async_session_maker
 from app.models.map_entity import MapEntity
 from app.models.threat import Threat
 from app.models.user import User
+from geoalchemy2 import Geography
+from geoalchemy2.elements import WKTElement
+from geoalchemy2.functions import ST_X, ST_Y, ST_DWithin, ST_MakePoint, ST_SetSRID
+from sqlalchemy import and_, cast, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

@@ -60,7 +60,7 @@ export function getActiveTransmittingCount(
     isSquadTransmitting(s, currentUser, fieldUnits)
   )
 
-  return transmitting.length > 0 ? transmitting.length : 1
+  return transmitting.length
 }
 
 /**

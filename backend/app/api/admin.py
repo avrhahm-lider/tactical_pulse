@@ -27,7 +27,11 @@ from app.schemas.user import (
 )
 from app.services.audit import log_audit_event
 from app.services.spatial import calculate_area_from_lat
-from app.sockets.server import broadcast_unit_status_changed, disconnect_user_sockets, sio
+from app.sockets.server import (
+    broadcast_unit_status_changed,
+    disconnect_user_sockets,
+    sio,
+)
 
 router = APIRouter(prefix="/admin", tags=["Administration"])
 

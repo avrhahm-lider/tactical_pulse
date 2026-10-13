@@ -81,7 +81,7 @@ export const ManagementDrawer: React.FC<ManagementDrawerProps> = ({
   }, [initialTab, isOpen])
 
   // Fetch data on open or tab change
-  const refreshData = async () => {
+  const refreshData = React.useCallback(async () => {
     if (!isOpen) return
     setIsLoading(true)
     try {
@@ -100,11 +100,11 @@ export const ManagementDrawer: React.FC<ManagementDrawerProps> = ({
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [isOpen])
 
   useEffect(() => {
     refreshData()
-  }, [isOpen, activeTab])
+  }, [isOpen, activeTab, refreshData])
 
   // Open Edit User modal
   const handleStartEditUser = (u: User) => {

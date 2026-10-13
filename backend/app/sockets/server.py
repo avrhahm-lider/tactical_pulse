@@ -5,9 +5,6 @@ from uuid import UUID
 
 import jwt
 import socketio
-from geoalchemy2.functions import ST_X, ST_Y
-from sqlalchemy import select
-
 from app.core.config import settings
 from app.core.security import decode_token
 from app.db.postgres import async_session_maker
@@ -19,6 +16,8 @@ from app.services.spatial import (
     haversine_distance_meters,
     persist_squad_location,
 )
+from geoalchemy2.functions import ST_X, ST_Y
+from sqlalchemy import select
 
 sio = socketio.AsyncServer(
     async_mode="asgi",

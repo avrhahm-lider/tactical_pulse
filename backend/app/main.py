@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 import socketio
@@ -15,12 +16,8 @@ from app.core.errors import (
     validation_exception_handler,
 )
 from app.db.postgres import init_db
-from app.sockets.server import sio
-
-
-import asyncio
-
 from app.simulator.engine import simulator_engine
+from app.sockets.server import sio
 
 
 @asynccontextmanager

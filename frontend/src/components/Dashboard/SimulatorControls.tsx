@@ -156,8 +156,6 @@ export const SimulatorControls: React.FC = () => {
     }
   }
 
-  if (!user) return null
-
   const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false)
   const layerMenuRef = useRef<HTMLDivElement>(null)
 
@@ -171,6 +169,8 @@ export const SimulatorControls: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isLayerMenuOpen])
+
+  if (!user) return null
 
   const mapLayerOptions: Array<{ id: 'dark' | 'satellite' | 'osm'; label: string; desc: string; icon: React.ReactNode }> = [
     { id: 'dark', label: 'Tactical Dark', desc: 'Esri Dark Canvas', icon: <Moon className="w-3.5 h-3.5 text-cyan-400" /> },

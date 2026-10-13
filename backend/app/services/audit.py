@@ -2,9 +2,8 @@ import ipaddress
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.audit_log import AuditLog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def sanitize_ip(ip: str | None) -> str | None:
