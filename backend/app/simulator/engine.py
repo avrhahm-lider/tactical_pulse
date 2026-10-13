@@ -6,7 +6,7 @@ from uuid import UUID
 
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.security import hash_password
 from app.db.postgres import async_session_maker
@@ -203,6 +203,21 @@ class SimulatorEngine:
         self._latest_squad_state: dict[UUID, tuple[float, float, float, str, datetime]] = {}
         self._latest_drone_state: dict[UUID, tuple[float, float, float, datetime]] = {}
         self._bg_persist_tasks: set[asyncio.Task] = set()
+        self._cached_entities: dict[str, Any] | None = None
+        self._squad_names: dict[UUID, str] = {}
+        self._precomputed_paths: dict[str, list] = {}
+        self._init_precomputed_paths()
+
+    def _init_precomputed_paths(self) -> None:
+        """Precomputes tactical dense waypoint paths once at engine startup for 0ms latency."""
+        for sc in SQUAD_CONFIGS:
+            speed_kmh = sc.get("speed_kmh", 40.0)
+            step_m = max(0.2, (speed_kmh / 3.6) * 0.25)
+            self._precomputed_paths[sc["username"]] = interpolate_route(sc["route"], step_meters=step_m)
+        for cfg in DRONE_CONFIGS:
+            speed_kmh = cfg.get("speed_kmh", 100.0)
+            step_m = max(0.5, (speed_kmh / 3.6) * 0.25)
+            self._precomputed_paths[cfg["name"]] = interpolate_route(cfg["key_points"], step_meters=step_m)
 
     def _spawn_persist_task(self, coro):
         task = asyncio.create_task(coro)
@@ -303,17 +318,29 @@ class SimulatorEngine:
             payload=payload,
         )
 
-        # 2. Check danger perimeter breaches for connected client of this squad
+        # 2. Check danger perimeter breaches for squad (broadcasts to squad & command center)
         from app.sockets.server import (
             _connected_clients,
             check_and_broadcast_danger_alerts,
         )
+        matching_sid = None
         for sid, client in list(_connected_clients.items()):
             if client.get("user_id") == squad_id:
                 client["lat"] = lat
                 client["lon"] = lon
                 client["area"] = area
-                await check_and_broadcast_danger_alerts(squad_sid=sid, squad_info=client)
+                matching_sid = sid
+                break
+
+        squad_name = self._squad_names.get(squad_id, "Combat Squad")
+        squad_info = {
+            "user_id": squad_id,
+            "username": squad_name,
+            "lat": lat,
+            "lon": lon,
+            "area": area,
+        }
+        await check_and_broadcast_danger_alerts(squad_sid=matching_sid, squad_info=squad_info)
 
         # 3. Throttle Postgres persistence: max once every 3.0s per squad
         squad_key = f"squad_{squad_id}"
@@ -433,24 +460,37 @@ class SimulatorEngine:
         except asyncio.CancelledError:
             pass
 
-    async def start(self, mode: str = "all") -> dict[str, Any]:
+    async def _load_or_provision_entities(self) -> dict[str, Any]:
         """
-        Launches full tactical simulation.
-        Automatically provisions:
-          - 2 static ground threats (Hostile Ambush Alpha, Minefield Perimeter Bravo)
-          - 2 high-speed UAV reconnaissance drones
-          - 2 active field squads (Golani & Paratroopers)
+        Batched retrieval and provisioning of all simulation entities.
+        Executes minimal database roundtrips and caches in memory for zero-latency subsequent starts.
         """
-        await self.stop()
-        self._is_running = True
-        self._current_mode = mode
+        if self._cached_entities is not None:
+            return self._cached_entities
 
         async with async_session_maker() as session:
-            # 0. Ensure command authority user exists for threat attribution
-            creator_stmt = select(User).where(User.role.in_(["MainCommandCenter", "AreaCommandCenter"]))
-            creator_user = (await session.execute(creator_stmt)).scalars().first()
+            gt_names = [gt["name"] for gt in GROUND_THREATS]
+            drone_names = [cfg["name"] for cfg in DRONE_CONFIGS]
+            squad_usernames = [sc["username"] for sc in SQUAD_CONFIGS]
+            all_threat_names = gt_names + drone_names
+
+            # 1. Batched query for all threats & users in 2 queries
+            threats_q = await session.execute(
+                select(Threat, ST_Y(Threat.geom), ST_X(Threat.geom)).where(Threat.name.in_(all_threat_names))
+            )
+            existing_threats = {t.name: (t, lat, lon) for t, lat, lon in threats_q.all()}
+
+            users_q = await session.execute(
+                select(User).where(User.username.in_(squad_usernames + ["admin"]))
+            )
+            existing_users = {u.username: u for u in users_q.scalars().all()}
+
+            # Creator resolution
+            creator_user = existing_users.get("admin")
             if not creator_user:
-                creator_user = (await session.execute(select(User))).scalars().first()
+                creator_user = (await session.execute(
+                    select(User).where(User.role.in_(["MainCommandCenter", "AreaCommandCenter"])).limit(1)
+                )).scalars().first()
 
             if not creator_user:
                 soldier_admin = Soldier(id="9990001", name="Gen. Eyal Zamir", role="commander")
@@ -473,12 +513,13 @@ class SimulatorEngine:
             creator_id = creator_user.id
             creator_soldier_id = creator_user.soldier_id
 
-            # 1. Provision / activate static ground threats
+            # 2. Provision missing ground threats
+            ground_threat_list = []
             for gt in GROUND_THREATS:
-                stmt = select(Threat).where(Threat.name == gt["name"])
-                threat = (await session.execute(stmt)).scalar_one_or_none()
-                if not threat:
-                    threat = Threat(
+                if gt["name"] in existing_threats:
+                    t, lat, lon = existing_threats[gt["name"]]
+                else:
+                    t = Threat(
                         type=gt["type"],
                         name=gt["name"],
                         description=gt.get("description"),
@@ -491,28 +532,26 @@ class SimulatorEngine:
                         created_by_id=creator_id,
                         created_by_soldier_id=creator_soldier_id,
                     )
-                    session.add(threat)
+                    session.add(t)
                     await session.flush()
-                    await session.refresh(threat)
-                    resp = ThreatResponse.from_threat(threat, gt["lat"], gt["lon"])
-                    await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
-                elif threat.status != "active":
-                    threat.status = "active"
-                    threat.engagement_status = "unassigned"
-                    await session.flush()
-                    resp = ThreatResponse.from_threat(threat, gt["lat"], gt["lon"])
-                    await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
+                    lat, lon = gt["lat"], gt["lon"]
+                resp = ThreatResponse.from_threat(t, lat, lon)
+                ground_threat_list.append({
+                    "id": t.id,
+                    "name": gt["name"],
+                    "lat": lat,
+                    "lon": lon,
+                    "payload": resp.model_dump(mode="json"),
+                })
 
-            # 2. Provision / activate dynamic UAV drones
-            drones_stmt = select(Threat).where(Threat.threat_type == "drone")
-            existing_drones = list((await session.execute(drones_stmt)).scalars().all())
-
-            active_drones = []
+            # 3. Provision missing dynamic UAV drones
+            drone_list = []
             for cfg in DRONE_CONFIGS:
-                d_match = next((d for d in existing_drones if d.name == cfg["name"]), None)
                 first_pt = cfg["key_points"][0]
-                if not d_match:
-                    d_match = Threat(
+                if cfg["name"] in existing_threats:
+                    d, lat, lon = existing_threats[cfg["name"]]
+                else:
+                    d = Threat(
                         type="movable",
                         name=cfg["name"],
                         threat_type="drone",
@@ -525,27 +564,24 @@ class SimulatorEngine:
                         created_by_id=creator_id,
                         created_by_soldier_id=creator_soldier_id,
                     )
-                    session.add(d_match)
+                    session.add(d)
                     await session.flush()
-                    await session.refresh(d_match)
-                    resp = ThreatResponse.from_threat(d_match, first_pt[0], first_pt[1])
-                    await broadcast_threat_event("threat_created", resp.model_dump(mode="json"))
-                elif d_match.status != "active":
-                    d_match.status = "active"
-                    d_match.engagement_status = "unassigned"
-                    await session.flush()
-                    resp = ThreatResponse.from_threat(d_match, first_pt[0], first_pt[1])
-                    await broadcast_threat_event("threat_updated", resp.model_dump(mode="json"))
-                active_drones.append((d_match, cfg))
+                    lat, lon = first_pt[0], first_pt[1]
+                resp = ThreatResponse.from_threat(d, lat, lon)
+                drone_list.append({
+                    "id": d.id,
+                    "name": cfg["name"],
+                    "cfg": cfg,
+                    "first_pt": first_pt,
+                    "payload": resp.model_dump(mode="json"),
+                })
 
-            # 3. Provision / ensure field squads exist in DB
-            active_squad_users = []
+            # 4. Provision missing squads and map entities
+            squad_list = []
+            squad_ids_to_fetch_map = []
             for sc in SQUAD_CONFIGS:
-                user_stmt = select(User).where(User.username == sc["username"])
-                user = (await session.execute(user_stmt)).scalar_one_or_none()
-
-                if not user:
-                    # Create soldier first if needed
+                u = existing_users.get(sc["username"])
+                if not u:
                     s_stmt = select(Soldier).where(Soldier.id == sc["soldier_id"])
                     soldier = (await session.execute(s_stmt)).scalar_one_or_none()
                     if not soldier:
@@ -557,7 +593,7 @@ class SimulatorEngine:
                         session.add(soldier)
                         await session.flush()
 
-                    user = User(
+                    u = User(
                         username=sc["username"],
                         password_hash=hash_password("squad123"),
                         role=sc["role"],
@@ -568,71 +604,136 @@ class SimulatorEngine:
                         status="active",
                         is_logged_in=False,
                     )
-                    session.add(user)
+                    session.add(u)
                     await session.flush()
+                squad_list.append({
+                    "id": u.id,
+                    "username": sc["username"],
+                    "name": sc["name"],
+                    "sc": sc,
+                })
+                self._squad_names[u.id] = sc["name"]
+                squad_ids_to_fetch_map.append(u.id)
 
-                # Ensure squad has MapEntity reset to route start point
-                map_stmt = select(MapEntity).where(MapEntity.id == user.id)
-                map_ent = (await session.execute(map_stmt)).scalar_one_or_none()
-                start_pt = sc["start_point"]
-                if not map_ent:
-                    map_ent = MapEntity(
-                        id=user.id,
-                        geom=WKTElement(f"POINT({start_pt[1]} {start_pt[0]})", srid=4326),
-                        heading=90.0,
-                        status="active",
+            # Batched map entity check
+            existing_maps = {
+                me.id: me
+                for me in (await session.execute(
+                    select(MapEntity).where(MapEntity.id.in_(squad_ids_to_fetch_map))
+                )).scalars().all()
+            }
+            for sq in squad_list:
+                start_pt = sq["sc"]["start_point"]
+                me = existing_maps.get(sq["id"])
+                if not me:
+                    session.add(
+                        MapEntity(
+                            id=sq["id"],
+                            geom=WKTElement(f"POINT({start_pt[1]} {start_pt[0]})", srid=4326),
+                            heading=90.0,
+                            status="active",
+                        )
                     )
-                    session.add(map_ent)
-                    await session.flush()
                 else:
-                    map_ent.geom = WKTElement(f"POINT({start_pt[1]} {start_pt[0]})", srid=4326)
-                    map_ent.status = "active"
-                    await session.flush()
-
-                active_squad_users.append((user, sc))
+                    me.status = "active"
+                    me.geom = WKTElement(f"POINT({start_pt[1]} {start_pt[0]})", srid=4326)
 
             await session.commit()
 
-            # 4. Synchronize memory threat cache for instant danger zone detection
+            # Synchronize active threats cache
             await _ensure_threats_cache_loaded(session)
 
-        # 5. Launch squad patrol tasks with exact speed configuration
-        if mode in ["all", "squads"]:
-            for u, sc in active_squad_users:
-                speed_kmh = sc.get("speed_kmh", 40.0)
-                step_m = max(0.2, (speed_kmh / 3.6) * 0.25)
-                dense_path = interpolate_route(sc["route"], step_meters=step_m)
-                task_name = f"squad_{u.username}"
-                self._tasks[task_name] = asyncio.create_task(
-                    self._run_squad_patrol(u.username, u.id, dense_path, delay=0.25)
-                )
+            self._cached_entities = {
+                "ground_threats": ground_threat_list,
+                "drones": drone_list,
+                "squads": squad_list,
+            }
+            return self._cached_entities
 
-        # 6. Launch drone flight tasks with exact speed configuration
-        if mode in ["all", "drones"]:
-            for d, cfg in active_drones:
-                speed_kmh = cfg.get("speed_kmh", 100.0)
-                step_m = max(0.5, (speed_kmh / 3.6) * 0.25)
-                dense_path = interpolate_route(cfg["key_points"], step_meters=step_m)
-                task_name = f"drone_{d.id}"
-                self._tasks[task_name] = asyncio.create_task(
-                    self._run_drone_flight(d.id, dense_path, cfg, delay=0.25)
+    async def _sync_entities_active_in_db(self, entities: dict[str, Any]) -> None:
+        """Asynchronously updates database statuses without delaying the start response."""
+        try:
+            threat_ids = [gt["id"] for gt in entities["ground_threats"]] + [d["id"] for d in entities["drones"]]
+            squad_ids = [sq["id"] for sq in entities["squads"]]
+            async with async_session_maker() as session:
+                await session.execute(
+                    update(Threat)
+                    .where(Threat.id.in_(threat_ids))
+                    .values(status="active", engagement_status="unassigned")
                 )
+                await session.execute(
+                    update(MapEntity)
+                    .where(MapEntity.id.in_(squad_ids))
+                    .values(status="active")
+                )
+                await session.commit()
+                await _ensure_threats_cache_loaded(session)
+        except Exception as e:
+            print(f"[SIMULATOR DB SYNC ERROR] {e}")
+
+    async def warmup(self) -> None:
+        """Preloads and warms up simulation entities in background at server start."""
+        try:
+            await self._load_or_provision_entities()
+            print("[SIMULATOR] Engine entities warmed up successfully.")
+        except Exception as e:
+            print(f"[SIMULATOR WARMUP WARNING] {e}")
+
+    async def start(self, mode: str = "all") -> dict[str, Any]:
+        """
+        Launches full tactical simulation instantaneously (zero UI freeze).
+        Pre-interpolated routes and cached entities ensure immediate start.
+        """
+        await self.stop()
+        self._is_running = True
+        self._current_mode = mode
+
+        entities = await self._load_or_provision_entities()
+
+        # 1. Immediately emit threat active state so radar & map update
+        for gt in entities["ground_threats"]:
+            await broadcast_threat_event("threat_updated", gt["payload"])
+
+        for d in entities["drones"]:
+            await broadcast_threat_event("threat_updated", d["payload"])
+
+        # 2. Launch squad patrol tasks with precomputed routes
+        if mode in ["all", "squads"]:
+            for sq in entities["squads"]:
+                path = self._precomputed_paths.get(sq["username"])
+                if path:
+                    task_name = f"squad_{sq['username']}"
+                    self._tasks[task_name] = asyncio.create_task(
+                        self._run_squad_patrol(sq["username"], sq["id"], path, delay=0.25)
+                    )
+
+        # 3. Launch drone flight tasks with precomputed routes
+        if mode in ["all", "drones"]:
+            for d in entities["drones"]:
+                path = self._precomputed_paths.get(d["name"])
+                if path:
+                    task_name = f"drone_{d['id']}"
+                    self._tasks[task_name] = asyncio.create_task(
+                        self._run_drone_flight(d["id"], path, d["cfg"], delay=0.25)
+                    )
+
+        # 4. Asynchronously update DB entity statuses in background
+        self._spawn_persist_task(self._sync_entities_active_in_db(entities))
 
         return self.get_status()
 
     async def stop(self) -> dict[str, Any]:
         """
-        Gracefully stops all simulation tasks and flushes final resting coordinates to DB.
+        Gracefully stops all simulation tasks instantaneously.
+        Flushes final resting coordinates to DB in background.
         """
         for name, task in list(self._tasks.items()):
             task.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks.values(), return_exceptions=True)
         self._tasks.clear()
         self._is_running = False
         self._current_mode = "stopped"
 
-        # Final DB flush so resting coordinates are saved
+        # Final DB flush in background
         flush_tasks = []
         for squad_id, (lat, lon, heading, area, now) in list(self._latest_squad_state.items()):
             flush_tasks.append(
@@ -643,7 +744,9 @@ class SimulatorEngine:
                 self._persist_drone_coords(threat_id, lat, lon, altitude, now)
             )
         if flush_tasks:
-            await asyncio.gather(*flush_tasks, return_exceptions=True)
+            async def _flush_all():
+                await asyncio.gather(*flush_tasks, return_exceptions=True)
+            self._spawn_persist_task(_flush_all())
 
         return self.get_status()
 

@@ -18,9 +18,16 @@ from app.db.postgres import init_db
 from app.sockets.server import sio
 
 
+import asyncio
+
+from app.simulator.engine import simulator_engine
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Pre-warm simulation engine in background for instant start responses
+    asyncio.create_task(simulator_engine.warmup())
     yield
 
 
