@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -39,3 +40,10 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if conn.dialect.name == "postgresql":
+            await conn.execute(
+                text("CREATE SEQUENCE IF NOT EXISTS soldier_id_seq START WITH 1000000 MAXVALUE 9999999")
+            )
+            await conn.execute(
+                text("ALTER TABLE soldiers ALTER COLUMN id SET DEFAULT lpad(nextval('soldier_id_seq')::text, 7, '0')")
+            )

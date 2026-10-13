@@ -32,6 +32,7 @@ async def setup_test_suite():
             "center_empty",
             "squad_dup_internal",
             "squad_dup_existing",
+            "squad_auto_test",
         ]
         test_soldier_ids = ["9999001", "9999002", "8888001", "7777001"]
         test_threat_names = [
@@ -301,6 +302,45 @@ async def test_soldiers_and_command_centers():
         unassigned_after = await client.get("/api/v1/admin/soldiers/unassigned", headers=headers)
         assert unassigned_after.status_code == 200
         assert not any(s["id"] == "8888001" for s in unassigned_after.json())
+
+        # 6. Auto-generate soldier ID and test unlinked soldiers endpoint
+        auto_res = await client.post(
+            "/api/v1/admin/soldiers",
+            json={"name": "Auto Generated", "role": "Combat"},
+            headers=headers,
+        )
+        assert auto_res.status_code == 201
+        auto_soldier = auto_res.json()
+        assert len(auto_soldier["id"]) == 7
+        assert auto_soldier["id"].isdigit()
+
+        unlinked_res = await client.get("/api/v1/admin/soldiers/unlinked", headers=headers)
+        assert unlinked_res.status_code == 200
+        assert any(s["id"] == auto_soldier["id"] for s in unlinked_res.json())
+
+        # 7. Create Squad with omitted coordinates and auto-generated roster soldier
+        field_res = await client.post(
+            "/api/v1/admin/users",
+            json={
+                "username": "squad_auto_test",
+                "name": "Auto Sector Squad",
+                "password": "password123",
+                "role": "Squad",
+                "area": "North",
+                "soldiers": [{"name": "Roster Alpha", "role": "Combat"}],
+            },
+            headers=headers,
+        )
+        assert field_res.status_code == 201
+        field_data = field_res.json()
+        assert field_data["lat"] == 33.0
+        assert field_data["lon"] == 35.3
+        assert field_data["area"] == "North"
+        assert len(field_data["soldiers"]) == 1
+        assert len(field_data["soldiers"][0]["id"]) == 7
+
+        # Clean up auto soldier
+        await client.delete(f"/api/v1/admin/soldiers/{auto_soldier['id']}", headers=headers)
 
 
 @pytest.mark.asyncio

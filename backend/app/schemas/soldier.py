@@ -5,11 +5,17 @@ from pydantic import BaseModel, Field
 
 class SoldierBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
-    role: str = Field(default="rifleman", max_length=50)
+    role: str = Field(default="Combat", max_length=50)
 
 
-class SoldierCreate(SoldierBase):
-    id: str = Field(..., pattern=r"^\d{7}$", description="Exactly 7-digit military ID")
+class SoldierCreate(BaseModel):
+    id: str | None = Field(
+        None,
+        pattern=r"^\d{7}$",
+        description="Optional 7-digit military ID (auto-generated if omitted)",
+    )
+    name: str = Field(..., min_length=2, max_length=100)
+    role: str = Field(default="Combat", max_length=50)
     squad_id: UUID | None = None
 
 

@@ -1,3 +1,4 @@
+import random
 import re
 from uuid import UUID
 
@@ -37,8 +38,15 @@ RE_SOLDIER_ID = re.compile(r"^\d{7}$")
 # HELPERS
 # =========================================================================
 
-def _mask_confidential_coords(role: str, lat: float | None, lon: float | None) -> tuple[float | None, float | None]:
-    return (None, None) if role in ("Radar", "AreaCommandCenter", "MainCommandCenter") else (lat, lon)
+
+def _mask_confidential_coords(
+    role: str, lat: float | None, lon: float | None
+) -> tuple[float | None, float | None]:
+    return (
+        (None, None)
+        if role in ("Radar", "AreaCommandCenter", "MainCommandCenter")
+        else (lat, lon)
+    )
 
 
 def _build_admin_user_response(
@@ -97,8 +105,10 @@ async def _validate_soldier_ids(
             message=f"Soldier military ID(s) not found in registry: {', '.join(sorted(missing))}",
         )
     conflicts = [
-        s for s in soldiers
-        if s.squad_id is not None and (current_user_id is None or s.squad_id != current_user_id)
+        s
+        for s in soldiers
+        if s.squad_id is not None
+        and (current_user_id is None or s.squad_id != current_user_id)
     ]
     if conflicts:
         conflict_info = [f"{s.id} ({s.name})" for s in conflicts]
@@ -110,9 +120,26 @@ async def _validate_soldier_ids(
     return soldiers
 
 
+async def _generate_unique_soldier_id(session: AsyncSession) -> str:
+    """Auto-generate a unique 7-digit military ID."""
+    for _ in range(100):
+        candidate = str(random.randint(1000000, 9999999))
+        existing = (
+            await session.execute(select(Soldier.id).where(Soldier.id == candidate))
+        ).scalar_one_or_none()
+        if not existing:
+            return candidate
+    raise AppException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        code="ID_GENERATION_FAILED",
+        message="Failed to generate unique 7-digit soldier ID",
+    )
+
+
 # =========================================================================
 # SOLDIERS MANAGEMENT
 # =========================================================================
+
 
 @router.get("/soldiers", response_model=list[SoldierResponse])
 async def list_soldiers(
@@ -139,10 +166,14 @@ async def list_unassigned_soldiers(
     current_user: User = Depends(require_command_center),
 ):
     """Returns list of all registered soldiers not currently assigned to any unit or command center."""
-    return await list_soldiers(unassigned=True, session=session, current_user=current_user)
+    return await list_soldiers(
+        unassigned=True, session=session, current_user=current_user
+    )
 
 
-@router.post("/soldiers", response_model=SoldierResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/soldiers", response_model=SoldierResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_soldier(
     req: SoldierCreate,
     request: Request,
@@ -151,16 +182,25 @@ async def create_soldier(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    existing = (await session.execute(select(Soldier).where(Soldier.id == req.id))).scalar_one_or_none()
-    if existing:
-        raise AppException(
-            status_code=status.HTTP_409_CONFLICT,
-            code="CONFLICT",
-            message=f"Soldier with ID '{req.id}' already exists",
-        )
+    # Auto-generate a unique 7-digit military ID if not provided
+    soldier_id = req.id
+    if not soldier_id:
+        soldier_id = await _generate_unique_soldier_id(session)
+    else:
+        existing = (
+            await session.execute(select(Soldier).where(Soldier.id == soldier_id))
+        ).scalar_one_or_none()
+        if existing:
+            raise AppException(
+                status_code=status.HTTP_409_CONFLICT,
+                code="CONFLICT",
+                message=f"Soldier with ID '{soldier_id}' already exists",
+            )
 
     if req.squad_id:
-        squad_exists = (await session.execute(select(User).where(User.id == req.squad_id))).scalar_one_or_none()
+        squad_exists = (
+            await session.execute(select(User.id).where(User.id == req.squad_id))
+        ).scalar_one_or_none()
         if not squad_exists:
             raise AppException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -168,7 +208,9 @@ async def create_soldier(
                 message=f"Squad unit '{req.squad_id}' not found",
             )
 
-    soldier = Soldier(id=req.id, name=req.name, role=req.role, squad_id=req.squad_id)
+    soldier = Soldier(
+        id=soldier_id, name=req.name, role=req.role, squad_id=req.squad_id
+    )
     session.add(soldier)
     await log_audit_event(
         session=session,
@@ -183,13 +225,31 @@ async def create_soldier(
     return SoldierResponse.model_validate(soldier)
 
 
+@router.get("/soldiers/unlinked", response_model=list[SoldierResponse])
+async def list_unlinked_soldiers(
+    session: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_command_center),
+):
+    """Returns all soldiers not currently linked to any user account."""
+    linked_ids_subquery = select(User.soldier_id).where(User.soldier_id.is_not(None))
+    stmt = (
+        select(Soldier)
+        .where(Soldier.id.not_in(linked_ids_subquery))
+        .order_by(Soldier.name.asc())
+    )
+    result = await session.execute(stmt)
+    return [SoldierResponse.model_validate(s) for s in result.scalars().all()]
+
+
 @router.get("/soldiers/{soldier_id}", response_model=SoldierResponse)
 async def get_soldier(
     soldier_id: str,
     session: AsyncSession = Depends(get_db),
     current_admin: User = Depends(require_main_command),
 ):
-    soldier = (await session.execute(select(Soldier).where(Soldier.id == soldier_id))).scalar_one_or_none()
+    soldier = (
+        await session.execute(select(Soldier).where(Soldier.id == soldier_id))
+    ).scalar_one_or_none()
     if not soldier:
         raise AppException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -206,7 +266,9 @@ async def update_soldier(
     session: AsyncSession = Depends(get_db),
     current_admin: User = Depends(require_main_command),
 ):
-    soldier = (await session.execute(select(Soldier).where(Soldier.id == soldier_id))).scalar_one_or_none()
+    soldier = (
+        await session.execute(select(Soldier).where(Soldier.id == soldier_id))
+    ).scalar_one_or_none()
     if not soldier:
         raise AppException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -219,7 +281,9 @@ async def update_soldier(
     if req.role is not None:
         soldier.role = req.role
     if req.squad_id is not None:
-        squad = (await session.execute(select(User).where(User.id == req.squad_id))).scalar_one_or_none()
+        squad = (
+            await session.execute(select(User).where(User.id == req.squad_id))
+        ).scalar_one_or_none()
         if not squad:
             raise AppException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -239,7 +303,9 @@ async def delete_soldier(
     session: AsyncSession = Depends(get_db),
     current_admin: User = Depends(require_main_command),
 ):
-    soldier = (await session.execute(select(Soldier).where(Soldier.id == soldier_id))).scalar_one_or_none()
+    soldier = (
+        await session.execute(select(Soldier).where(Soldier.id == soldier_id))
+    ).scalar_one_or_none()
     if not soldier:
         raise AppException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -247,7 +313,9 @@ async def delete_soldier(
             message=f"Soldier '{soldier_id}' not found",
         )
 
-    linked_user = (await session.execute(select(User).where(User.soldier_id == soldier_id))).scalar_one_or_none()
+    linked_user = (
+        await session.execute(select(User).where(User.soldier_id == soldier_id))
+    ).scalar_one_or_none()
     if linked_user:
         raise AppException(
             status_code=status.HTTP_409_CONFLICT,
@@ -263,6 +331,7 @@ async def delete_soldier(
 # =========================================================================
 # USERS MANAGEMENT
 # =========================================================================
+
 
 @router.get("/users", response_model=list[AdminUserResponse])
 async def list_all_users(
@@ -282,7 +351,9 @@ async def list_all_users(
     return [_build_admin_user_response(u, lat, lon) for u, lat, lon in result.all()]
 
 
-@router.post("/users", response_model=AdminUserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/users", response_model=AdminUserResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_user_or_unit(
     req: UserCreate,
     request: Request,
@@ -291,7 +362,9 @@ async def create_user_or_unit(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    existing_user = (await session.execute(select(User).where(User.username == req.username))).scalar_one_or_none()
+    existing_user = (
+        await session.execute(select(User).where(User.username == req.username))
+    ).scalar_one_or_none()
     if existing_user:
         raise AppException(
             status_code=status.HTTP_409_CONFLICT,
@@ -299,16 +372,47 @@ async def create_user_or_unit(
             message=f"Username '{req.username}' already exists",
         )
 
+    assigned_role = req.role
+    assigned_area = req.area
+
+    # Auto-promote role to SapperSquad if any roster soldier is a sapper
+    if req.soldiers and any((s.role or "").lower() == "sapper" for s in req.soldiers):
+        assigned_role = "SapperSquad"
+
+    # RBAC Linking Rules:
+    # "Field Team" (Squad/SapperSquad) and "Radar" users are created without being linked to a specific soldier.
+    # Other user types (MainCommandCenter, AreaCommandCenter) must be linked to a soldier.
+    if assigned_role in ["Squad", "SapperSquad", "Radar"]:
+        req.soldier_id = None
+    else:
+        # Fallback to first assigned soldier if soldier_id was not explicitly passed
+        if not req.soldier_id:
+            if req.soldier_ids:
+                req.soldier_id = req.soldier_ids[0]
+            elif req.soldiers and req.soldiers[0].id:
+                req.soldier_id = req.soldiers[0].id
+
+        if not req.soldier_id:
+            raise AppException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                code="VALIDATION_ERROR",
+                message="At least one soldier is required: this user type must be linked to a soldier selected from the dropdown list",
+            )
+
     soldier = None
     if req.soldier_id:
-        soldier = (await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))).scalar_one_or_none()
+        soldier = (
+            await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))
+        ).scalar_one_or_none()
         if not soldier:
             raise AppException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 code="NOT_FOUND",
                 message=f"Soldier with ID '{req.soldier_id}' not found in soldiers registry",
             )
-        linked = (await session.execute(select(User).where(User.soldier_id == req.soldier_id))).scalar_one_or_none()
+        linked = (
+            await session.execute(select(User).where(User.soldier_id == req.soldier_id))
+        ).scalar_one_or_none()
         if linked:
             raise AppException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -316,27 +420,17 @@ async def create_user_or_unit(
                 message=f"Soldier '{req.soldier_id}' is already linked to another user account",
             )
 
-    assigned_role = req.role
-    assigned_area = req.area
+    # Validate and fetch existing unassigned soldiers to assign (if provided)
+    existing_to_assign = (
+        await _validate_soldier_ids(session, req.soldier_ids) if req.soldier_ids else []
+    )
 
-    # Enforce soldier requirement for combat squads AND command centers
-    if req.role in ["Squad", "SapperSquad", "AreaCommandCenter", "MainCommandCenter"]:
-        total_soldiers = (len(req.soldiers) if req.soldiers else 0) + (len(req.soldier_ids) if req.soldier_ids else 0)
-        if total_soldiers == 0 and not req.soldier_id:
-            unit_label = "Command Center" if "CommandCenter" in req.role else "combat squad"
-            raise AppException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                code="VALIDATION_ERROR",
-                message=f"At least one soldier is required when registering a {unit_label}",
-            )
-        if req.soldiers and any(s.role.lower() == "sapper" for s in req.soldiers):
-            assigned_role = "SapperSquad"
-
-    # Validate and fetch existing unassigned soldiers to assign
-    existing_to_assign = await _validate_soldier_ids(session, req.soldier_ids) if req.soldier_ids else []
-
-    # Validate soldier roster uniqueness for newly created soldiers
+    # Validate soldier roster uniqueness and auto-assign IDs for newly created soldiers
     if req.soldiers:
+        for s in req.soldiers:
+            if not s.id:
+                s.id = await _generate_unique_soldier_id(session)
+
         soldier_ids = [s.id for s in req.soldiers]
         if len(soldier_ids) != len(set(soldier_ids)):
             raise AppException(
@@ -350,9 +444,15 @@ async def create_user_or_unit(
                 code="VALIDATION_ERROR",
                 message="Soldier ID cannot be present in both newly created soldiers and existing soldier_ids",
             )
-        conflict_soldier_ids = (await session.execute(
-            select(Soldier.id).where(Soldier.id.in_(soldier_ids))
-        )).scalars().all()
+        conflict_soldier_ids = (
+            (
+                await session.execute(
+                    select(Soldier.id).where(Soldier.id.in_(soldier_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
         if conflict_soldier_ids:
             raise AppException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -360,28 +460,25 @@ async def create_user_or_unit(
                 message=f"Soldier military ID(s) already registered: {', '.join(conflict_soldier_ids)}",
             )
 
-    # Field units require initial coordinates
+    # Provide safe tactical coordinate defaults for field units if not supplied by the form
     is_field_unit = assigned_role in ["Squad", "SapperSquad", "Radar"]
+    if is_field_unit and (req.lat is None or req.lon is None):
+        sector_coords = {
+            "North": (33.0000, 35.3000),
+            "Center": (32.0853, 34.7818),
+            "South": (31.2000, 34.7000),
+            "Global": (32.0853, 34.7818),
+        }
+        req.lat, req.lon = sector_coords.get(
+            assigned_area or "Center", (32.0853, 34.7818)
+        )
+
     if is_field_unit:
-        if req.lat is None or req.lon is None:
-            raise AppException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                code="VALIDATION_ERROR",
-                message="Coordinates (lat, lon) are strictly required for tactical field units",
-            )
         assigned_area = calculate_area_from_lat(req.lat)
     elif assigned_role == "MainCommandCenter":
         assigned_area = "Global"
-    elif assigned_role == "AreaCommandCenter":
-        if not assigned_area:
-            if req.lat is not None:
-                assigned_area = calculate_area_from_lat(req.lat)
-            else:
-                raise AppException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    code="VALIDATION_ERROR",
-                    message="Area must be specified for AreaCommandCenter (North, Center, South)",
-                )
+    elif assigned_role == "AreaCommandCenter" and not assigned_area:
+        assigned_area = calculate_area_from_lat(req.lat) if req.lat is not None else "Center"
 
     new_user = User(
         username=req.username,
@@ -410,7 +507,11 @@ async def create_user_or_unit(
     if soldier and soldier.squad_id is None:
         soldier.squad_id = new_user.id
 
-    if (is_field_unit or assigned_role == "AreaCommandCenter") and req.lat is not None and req.lon is not None:
+    if (
+        (is_field_unit or assigned_role == "AreaCommandCenter")
+        and req.lat is not None
+        and req.lon is not None
+    ):
         session.add(
             MapEntity(
                 id=new_user.id,
@@ -426,7 +527,11 @@ async def create_user_or_unit(
         user_id=current_admin.id,
         resource_type="user",
         resource_id=new_user.id,
-        details={"username": new_user.username, "role": new_user.role, "area": new_user.area},
+        details={
+            "username": new_user.username,
+            "role": new_user.role,
+            "area": new_user.area,
+        },
         ip_address=client_ip,
     )
     await session.commit()
@@ -444,7 +549,9 @@ async def update_user(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
     if not user:
         raise AppException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -453,16 +560,22 @@ async def update_user(
         )
 
     if req.soldier_id is not None and req.soldier_id != user.soldier_id:
-        soldier = (await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))).scalar_one_or_none()
+        soldier = (
+            await session.execute(select(Soldier).where(Soldier.id == req.soldier_id))
+        ).scalar_one_or_none()
         if not soldier:
             raise AppException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 code="NOT_FOUND",
                 message=f"Soldier '{req.soldier_id}' not found",
             )
-        linked = (await session.execute(
-            select(User).where(User.soldier_id == req.soldier_id, User.id != user_id)
-        )).scalar_one_or_none()
+        linked = (
+            await session.execute(
+                select(User).where(
+                    User.soldier_id == req.soldier_id, User.id != user_id
+                )
+            )
+        ).scalar_one_or_none()
         if linked:
             raise AppException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -483,12 +596,16 @@ async def update_user(
         user.password_hash = hash_password(req.password)
 
     if req.soldier_ids is not None:
-        soldiers_to_assign = await _validate_soldier_ids(session, req.soldier_ids, current_user_id=user.id)
+        soldiers_to_assign = await _validate_soldier_ids(
+            session, req.soldier_ids, current_user_id=user.id
+        )
         for s in soldiers_to_assign:
             s.squad_id = user.id
 
     if req.lat is not None and req.lon is not None:
-        map_ent = (await session.execute(select(MapEntity).where(MapEntity.id == user_id))).scalar_one_or_none()
+        map_ent = (
+            await session.execute(select(MapEntity).where(MapEntity.id == user_id))
+        ).scalar_one_or_none()
         if map_ent:
             map_ent.geom = WKTElement(f"POINT({req.lon} {req.lat})", srid=4326)
         else:
@@ -507,15 +624,22 @@ async def update_user(
         user_id=current_admin.id,
         resource_type="user",
         resource_id=user.id,
-        details={"username": user.username, "updated_fields": list(req.model_dump(exclude_unset=True).keys())},
+        details={
+            "username": user.username,
+            "updated_fields": list(req.model_dump(exclude_unset=True).keys()),
+        },
         ip_address=client_ip,
     )
     await session.commit()
     await session.refresh(user, ["soldiers", "soldier"])
 
-    map_row = (await session.execute(
-        select(ST_Y(MapEntity.geom), ST_X(MapEntity.geom)).where(MapEntity.id == user.id)
-    )).first()
+    map_row = (
+        await session.execute(
+            select(ST_Y(MapEntity.geom), ST_X(MapEntity.geom)).where(
+                MapEntity.id == user.id
+            )
+        )
+    ).first()
     lat, lon = (map_row[0], map_row[1]) if map_row else (None, None)
     return _build_admin_user_response(user, lat, lon)
 
@@ -530,7 +654,9 @@ async def update_user_status(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
     if not user:
         raise AppException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -550,7 +676,9 @@ async def update_user_status(
         user.is_logged_in = False
         user.session_id = None
 
-    map_ent = (await session.execute(select(MapEntity).where(MapEntity.id == user_id))).scalar_one_or_none()
+    map_ent = (
+        await session.execute(select(MapEntity).where(MapEntity.id == user_id))
+    ).scalar_one_or_none()
     if map_ent:
         map_ent.status = req.status
 
@@ -584,7 +712,9 @@ async def reset_user_session(
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
 
-    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
     if not user:
         raise AppException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -606,7 +736,9 @@ async def reset_user_session(
         ip_address=client_ip,
     )
     await session.commit()
-    return MessageResponse(message=f"Session reset for user '{user.username}' successfully")
+    return MessageResponse(
+        message=f"Session reset for user '{user.username}' successfully"
+    )
 
 
 @router.post("/users/reset-all-sessions", response_model=MessageResponse)
@@ -616,7 +748,9 @@ async def reset_all_sessions(
     current_admin: User = Depends(require_main_command),
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
-    stmt = update(User).values(is_logged_in=False, session_id=None, last_activity_at=None)
+    stmt = update(User).values(
+        is_logged_in=False, session_id=None, last_activity_at=None
+    )
     res = await session.execute(stmt)
     count = res.rowcount
 
@@ -630,4 +764,6 @@ async def reset_all_sessions(
         ip_address=client_ip,
     )
     await session.commit()
-    return MessageResponse(message=f"All active user sessions reset successfully ({count} users updated)")
+    return MessageResponse(
+        message=f"All active user sessions reset successfully ({count} users updated)"
+    )
