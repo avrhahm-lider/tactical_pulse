@@ -184,7 +184,13 @@ export const SimulatorControls: React.FC = () => {
       {/* 1. Map Layer View Style Selector */}
       <div className="relative" ref={layerMenuRef}>
         <button
-          onClick={() => setIsLayerMenuOpen((prev) => !prev)}
+          onClick={() => {
+            setIsLayerMenuOpen((prev) => {
+              const next = !prev
+              if (next) setIsOpen(false)
+              return next
+            })
+          }}
           title="Change Map View Style"
           aria-label="Change Map View Style"
           className={`w-9 h-9 rounded-lg border flex items-center justify-center shadow-xl transition-all cursor-pointer backdrop-blur-md ${
@@ -238,7 +244,13 @@ export const SimulatorControls: React.FC = () => {
       {/* 2. Tactical Simulator Button */}
       <div className="relative">
         <button
-          onClick={() => setIsOpen((prev) => !prev)}
+          onClick={() => {
+            setIsOpen((prev) => {
+              const next = !prev
+              if (next) setIsLayerMenuOpen(false)
+              return next
+            })
+          }}
           title={isOpen ? 'Close Tactical Simulator Panel' : 'Open Tactical Simulator Panel'}
           aria-label="Tactical Simulator"
           className={`relative w-9 h-9 rounded-lg border flex items-center justify-center shadow-xl transition-all cursor-pointer backdrop-blur-md ${
