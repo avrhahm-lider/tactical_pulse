@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { api } from '../../services/api'
 import { useMapStore } from '../../store/useMapStore'
-import type { Soldier, Area } from '../../types'
+import type { Soldier, Area, Squad } from '../../types'
 
 export type RegistrationTab = 'soldier' | 'force' | 'user'
 export type ForceTypeOption = 'Administrator' | 'Regional HQ' | 'Radar' | 'Field Force'
@@ -25,11 +25,25 @@ interface UserRegistrationModalProps {
   onClose: () => void
 }
 
+interface CustomForce {
+  id: string
+  name: string
+  description: string
+  type: ForceTypeOption
+  area: Area
+  lat?: number
+  lon?: number
+}
+
+const LOCAL_STORAGE_ASSIGNED_TEAMS_KEY = 'tactical_assigned_team_ids'
+const LOCAL_STORAGE_CUSTOM_FORCES_KEY = 'tactical_custom_forces'
+
 export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   isOpen,
   onClose,
 }) => {
   const {
+    squads,
     loadSnapshot,
     registrationModalTab,
     setRegistrationModalTab,
@@ -38,20 +52,21 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   // Active Tab
   const [activeTab, setActiveTab] = useState<RegistrationTab>('soldier')
 
-  // Status feedback
+  // Feedback states
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   // -------------------------------------------------------------
-  // TAB 1: ADD SOLDIER (3 fields: Name, Role [EOD, Support/Non-combat, Combat])
+  // TAB 1: ADD SOLDIER (7-digit ID, Name, Role [EOD, Support/Non-combat, Combat])
   // -------------------------------------------------------------
+  const [soldierId, setSoldierId] = useState('')
   const [soldierName, setSoldierName] = useState('')
   const [soldierRole, setSoldierRole] = useState<SoldierRoleOption>('Combat')
 
   // -------------------------------------------------------------
-  // TAB 2: ADD FORCE (4 options: Administrator, Regional HQ, Radar, Field Force)
-  // Each requires: name, description. Regional HQ also requires: area/region.
+  // TAB 2: ADD FORCE (Administrator, Regional HQ, Radar, Field Force)
+  // Name, Description. Regional HQ also requires Area/Region.
   // -------------------------------------------------------------
   const [forceType, setForceType] = useState<ForceTypeOption>('Field Force')
   const [forceName, setForceName] = useState('')
@@ -60,20 +75,25 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
 
   // -------------------------------------------------------------
   // TAB 3: ADD USER (Username, Password, User Type)
-  // "Field Team" and "Radar" created without soldier link.
-  // Others must be linked to a soldier from dropdown (unlinked only).
+  // Field Team: select specific team from existing ones (cannot re-link assigned ones)
+  // Regional HQ: select linked soldier AND assigned regional HQ (no region dropdown)
+  // Radar: unlinked
+  // Administrator: linked to soldier
   // -------------------------------------------------------------
   const [userType, setUserType] = useState<UserTypeOption>('Field Team')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [selectedSoldierId, setSelectedSoldierId] = useState<string>('')
-  const [userRegion, setUserRegion] = useState<Area>('Center')
+  const [selectedTeamId, setSelectedTeamId] = useState<string>('')
+  const [selectedRegionalHQId, setSelectedRegionalHQId] = useState<string>('')
 
-  // Available (Unlinked) Soldiers for Tab 3
+  // Registry data
   const [unlinkedSoldiers, setUnlinkedSoldiers] = useState<Soldier[]>([])
   const [isLoadingSoldiers, setIsLoadingSoldiers] = useState(false)
+  const [assignedTeamIds, setAssignedTeamIds] = useState<string[]>([])
+  const [customForces, setCustomForces] = useState<CustomForce[]>([])
 
-  // Sync tab with store when modal opens
+  // Load persistence and unlinked soldiers when modal opens
   useEffect(() => {
     if (isOpen) {
       if (registrationModalTab) {
@@ -81,6 +101,27 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       }
       setErrorMessage(null)
       setSuccessMessage(null)
+
+      // Load assigned team IDs
+      try {
+        const storedAssigned = localStorage.getItem(LOCAL_STORAGE_ASSIGNED_TEAMS_KEY)
+        if (storedAssigned) {
+          setAssignedTeamIds(JSON.parse(storedAssigned))
+        }
+      } catch (e) {
+        console.error('Failed to load assigned teams:', e)
+      }
+
+      // Load custom forces
+      try {
+        const storedForces = localStorage.getItem(LOCAL_STORAGE_CUSTOM_FORCES_KEY)
+        if (storedForces) {
+          setCustomForces(JSON.parse(storedForces))
+        }
+      } catch (e) {
+        console.error('Failed to load custom forces:', e)
+      }
+
       fetchUnlinkedSoldiers()
     }
   }, [isOpen, registrationModalTab])
@@ -101,9 +142,13 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     }
   }
 
-  if (!isOpen) return null
+  // Generate 7-digit ID helper
+  const handleGenerateSoldierId = () => {
+    const randomId = Math.floor(1000000 + Math.random() * 9000000).toString()
+    setSoldierId(randomId)
+  }
 
-  // Switch tabs handler
+  // Switch tabs
   const handleTabChange = (tab: RegistrationTab) => {
     setActiveTab(tab)
     setRegistrationModalTab(tab)
@@ -115,7 +160,70 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
   }
 
   // -------------------------------------------------------------
-  // SUBMIT HANDLERS
+  // COMPUTED LISTS FOR TAB 3
+  // -------------------------------------------------------------
+
+  // 1. All existing teams (from squads store + custom forces of type Field Force)
+  const allFieldTeams: { id: string; name: string; description?: string }[] = []
+  const seenTeamIds = new Set<string>()
+
+  // From map squads:
+  Object.values(squads).forEach((sq: Squad) => {
+    if (sq.role === 'Squad' || sq.role === 'SapperSquad') {
+      if (!seenTeamIds.has(sq.id)) {
+        seenTeamIds.add(sq.id)
+        allFieldTeams.push({ id: sq.id, name: sq.name, description: sq.description })
+      }
+    }
+  })
+
+  // From custom forces:
+  customForces.forEach((cf) => {
+    if (cf.type === 'Field Force' && !seenTeamIds.has(cf.id)) {
+      seenTeamIds.add(cf.id)
+      allFieldTeams.push({ id: cf.id, name: cf.name, description: cf.description })
+    }
+  })
+
+  // Filter out teams that already have been assigned a username and password
+  const availableTeams = allFieldTeams.filter((team) => !assignedTeamIds.includes(team.id))
+
+  // 2. All existing Regional Headquarters
+  const allRegionalHQs: { id: string; name: string; area: Area }[] = [
+    { id: 'hq_north', name: 'Northern Command Center', area: 'North' },
+    { id: 'hq_center', name: 'Central Command Center', area: 'Center' },
+    { id: 'hq_south', name: 'Southern Command Center', area: 'South' },
+  ]
+  const seenHQNames = new Set(allRegionalHQs.map((h) => h.name.toLowerCase()))
+
+  // Add any custom Regional HQs from custom forces
+  customForces.forEach((cf) => {
+    if (cf.type === 'Regional HQ' && !seenHQNames.has(cf.name.toLowerCase())) {
+      seenHQNames.add(cf.name.toLowerCase())
+      allRegionalHQs.push({ id: cf.id, name: cf.name, area: cf.area })
+    }
+  })
+
+  // Also check squads store for any other AreaCommandCenter
+  Object.values(squads).forEach((sq: Squad) => {
+    if (sq.role === 'AreaCommandCenter' && !seenHQNames.has(sq.name.toLowerCase())) {
+      seenHQNames.add(sq.name.toLowerCase())
+      allRegionalHQs.push({ id: sq.id, name: sq.name, area: sq.area })
+    }
+  })
+
+  // Set default team / HQ selections
+  useEffect(() => {
+    if (availableTeams.length > 0 && !selectedTeamId) {
+      setSelectedTeamId(availableTeams[0].id)
+    }
+    if (allRegionalHQs.length > 0 && !selectedRegionalHQId) {
+      setSelectedRegionalHQId(allRegionalHQs[0].id)
+    }
+  }, [availableTeams, allRegionalHQs, selectedTeamId, selectedRegionalHQId])
+
+  // -------------------------------------------------------------
+  // SUBMISSION LOGIC
   // -------------------------------------------------------------
 
   // 1. Submit Add Soldier
@@ -123,6 +231,11 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     e.preventDefault()
     setErrorMessage(null)
     setSuccessMessage(null)
+
+    if (!soldierId || soldierId.length !== 7 || !/^\d{7}$/.test(soldierId)) {
+      setErrorMessage('Soldier ID must be exactly 7 digits.')
+      return
+    }
 
     if (!soldierName.trim()) {
       setErrorMessage('Soldier name is required.')
@@ -132,11 +245,13 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     setIsLoading(true)
     try {
       const newSoldier = await api.admin.createSoldier({
+        id: soldierId.trim(),
         name: soldierName.trim(),
         role: soldierRole,
       })
 
-      setSuccessMessage(`Soldier ${newSoldier.name} (${newSoldier.role}) successfully registered!`)
+      setSuccessMessage(`Soldier ${newSoldier.name} (ID: ${newSoldier.id}) successfully registered!`)
+      setSoldierId('')
       setSoldierName('')
       setSoldierRole('Combat')
       await loadSnapshot()
@@ -174,7 +289,6 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
 
     setIsLoading(true)
     try {
-      // Slugify name for credentials
       const slug = forceName
         .toLowerCase()
         .replace(/[^a-z0-9]/g, '_')
@@ -231,16 +345,30 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         payload.lon = defaultLon
       }
 
-      // If command center requires a soldier in the existing backend, attach first available or mock
+      // Attach unlinked soldier if needed by command center
       if (backendRole === 'MainCommandCenter' || backendRole === 'AreaCommandCenter') {
         if (unlinkedSoldiers.length > 0) {
           payload.soldier_id = unlinkedSoldiers[0].id
         }
       }
 
-      await api.admin.createUser(payload)
+      const created = await api.admin.createUser(payload)
 
-      setSuccessMessage(`Force '${forceName}' (${forceType}) successfully added!`)
+      // Store in custom forces registry
+      const newCustomForce: CustomForce = {
+        id: String(created.id),
+        name: forceName.trim(),
+        description: forceDescription.trim(),
+        type: forceType,
+        area: backendArea,
+        lat: defaultLat,
+        lon: defaultLon,
+      }
+      const updatedForces = [...customForces, newCustomForce]
+      setCustomForces(updatedForces)
+      localStorage.setItem(LOCAL_STORAGE_CUSTOM_FORCES_KEY, JSON.stringify(updatedForces))
+
+      setSuccessMessage(`Force '${forceName}' (${forceType}) successfully registered!`)
       setForceName('')
       setForceDescription('')
       await loadSnapshot()
@@ -275,11 +403,30 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       return
     }
 
-    const requiresSoldier = userType !== 'Field Team' && userType !== 'Radar'
-
-    if (requiresSoldier && !selectedSoldierId) {
-      setErrorMessage('This user type must be linked to a soldier selected from the dropdown list.')
-      return
+    // Role-specific validation
+    if (userType === 'Field Team') {
+      if (!selectedTeamId) {
+        setErrorMessage('You must select a specific team from the existing ones.')
+        return
+      }
+      if (assignedTeamIds.includes(selectedTeamId)) {
+        setErrorMessage('This team has already been assigned a user account and cannot be linked again.')
+        return
+      }
+    } else if (userType === 'Regional HQ') {
+      if (!selectedSoldierId) {
+        setErrorMessage('You must specify the soldier linked to the Regional HQ user account.')
+        return
+      }
+      if (!selectedRegionalHQId) {
+        setErrorMessage('You must select the Regional Headquarters to which this user is assigned.')
+        return
+      }
+    } else if (userType === 'Administrator') {
+      if (!selectedSoldierId) {
+        setErrorMessage('Administrator accounts must be linked to a soldier selected from the dropdown.')
+        return
+      }
     }
 
     setIsLoading(true)
@@ -289,23 +436,30 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       let displayName = username.trim()
       let defaultLat = 32.0853
       let defaultLon = 34.7818
+      let targetSoldierId: string | undefined = undefined
 
       const linkedSoldier = unlinkedSoldiers.find((s) => s.id === selectedSoldierId)
 
-      if (userType === 'Administrator') {
-        backendRole = 'MainCommandCenter'
-        backendArea = 'Global'
-        displayName = linkedSoldier ? `${linkedSoldier.name} (Admin)` : username.trim()
-        defaultLat = 32.0750
-        defaultLon = 34.7920
+      if (userType === 'Field Team') {
+        const selectedTeam = allFieldTeams.find((t) => t.id === selectedTeamId)
+        backendRole = 'Squad'
+        backendArea = 'Center'
+        displayName = selectedTeam ? selectedTeam.name : `Field Team - ${username.trim()}`
+        defaultLat = 32.0853
+        defaultLon = 34.7818
+        // No soldier link for Field Team
       } else if (userType === 'Regional HQ') {
+        const selectedHQ = allRegionalHQs.find((h) => h.id === selectedRegionalHQId)
         backendRole = 'AreaCommandCenter'
-        backendArea = userRegion
-        displayName = linkedSoldier ? `${linkedSoldier.name} (${userRegion} HQ)` : username.trim()
-        if (userRegion === 'North') {
+        backendArea = selectedHQ ? selectedHQ.area : 'Center'
+        displayName = linkedSoldier
+          ? `${linkedSoldier.name} (${selectedHQ ? selectedHQ.name : 'Regional HQ'})`
+          : username.trim()
+        targetSoldierId = selectedSoldierId
+        if (backendArea === 'North') {
           defaultLat = 33.0000
           defaultLon = 35.3000
-        } else if (userRegion === 'South') {
+        } else if (backendArea === 'South') {
           defaultLat = 31.2000
           defaultLon = 34.7000
         } else {
@@ -318,11 +472,15 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         displayName = `Radar Station - ${username.trim()}`
         defaultLat = 33.1000
         defaultLon = 35.4000
+        // No soldier link for Radar
       } else {
-        // Field Team (Squad) - coordinates will be provided when unit goes online
-        backendRole = 'Squad'
-        backendArea = 'Center'
-        displayName = `Field Team - ${username.trim()}`
+        // Administrator
+        backendRole = 'MainCommandCenter'
+        backendArea = 'Global'
+        displayName = linkedSoldier ? `${linkedSoldier.name} (Supreme Admin)` : username.trim()
+        targetSoldierId = selectedSoldierId
+        defaultLat = 32.0750
+        defaultLon = 34.7920
       }
 
       const payload: Record<string, unknown> = {
@@ -339,17 +497,24 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         payload.lon = defaultLon
       }
 
-      // Only link soldier if not Field Team or Radar
-      if (requiresSoldier && selectedSoldierId) {
-        payload.soldier_id = selectedSoldierId
+      if (targetSoldierId) {
+        payload.soldier_id = targetSoldierId
       }
 
       await api.admin.createUser(payload)
+
+      // If Field Team, record that this team has now been assigned credentials
+      if (userType === 'Field Team' && selectedTeamId) {
+        const newAssigned = [...assignedTeamIds, selectedTeamId]
+        setAssignedTeamIds(newAssigned)
+        localStorage.setItem(LOCAL_STORAGE_ASSIGNED_TEAMS_KEY, JSON.stringify(newAssigned))
+      }
 
       setSuccessMessage(`User account '${username.trim()}' (${userType}) successfully created!`)
       setUsername('')
       setPassword('')
       setSelectedSoldierId('')
+      setSelectedTeamId('')
       await loadSnapshot()
       await fetchUnlinkedSoldiers()
 
@@ -368,6 +533,8 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     }
   }
 
+  if (!isOpen) return null
+
   return (
     <div className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
       <div className="relative w-full max-w-xl hud-panel rounded-xl border border-cyan-500/70 shadow-2xl p-6 overflow-hidden max-h-[92vh] flex flex-col">
@@ -382,7 +549,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                 REGISTRATION PANEL
               </h2>
               <p className="text-[11px] text-slate-400 font-mono">
-                MILITARY REGISTRY, FORCES & USER ACCESS
+                MILITARY REGISTRY, FORCES &amp; USER ACCESS
               </p>
             </div>
           </div>
@@ -436,7 +603,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
           </button>
         </div>
 
-        {/* Status Alerts */}
+        {/* Status Feedback */}
         {errorMessage && (
           <div className="mt-3 p-3 rounded-lg bg-red-950/80 border border-red-700 text-red-200 text-xs font-mono flex items-start gap-2 shrink-0">
             <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
@@ -454,18 +621,43 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
         {/* Tab Contents */}
         <div className="mt-4 overflow-y-auto pr-1 flex-1 font-mono">
           {/* ========================================================= */}
-          {/* TAB 1: ADD SOLDIER (3 Fields: Name, Role [EOD, Support/Non-combat, Combat]) */}
+          {/* TAB 1: ADD SOLDIER (7-Digit ID, Name, Role [EOD, Support/Non-combat, Combat]) */}
           {/* ========================================================= */}
           {activeTab === 'soldier' && (
             <form onSubmit={handleSubmitSoldier} className="space-y-4">
               <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800 text-[11px] text-slate-400">
-                Register a new military personnel into the central defense registry.
+                Register military personnel with verified 7-digit military ID into the registry.
               </div>
 
-              {/* Field 1: Name */}
+              {/* Field 1: 7-Digit Military ID */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-300 tracking-wider uppercase font-semibold">
+                    1. 7-Digit Military ID Number
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateSoldierId}
+                    className="text-[10px] text-cyan-400 hover:underline cursor-pointer"
+                  >
+                    + GENERATE ID
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  required
+                  maxLength={7}
+                  placeholder="e.g. 5000001"
+                  value={soldierId}
+                  onChange={(e) => setSoldierId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-cyan-300 text-xs focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Field 2: Soldier Name */}
               <div>
                 <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
-                  1. Soldier Full Name
+                  2. Soldier Full Name
                 </label>
                 <input
                   type="text"
@@ -477,17 +669,17 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                 />
               </div>
 
-              {/* Field 2 & 3: Role (EOD, Support/Non-combat, Combat) */}
+              {/* Field 3: Role (EOD, Support/Non-combat, Combat) */}
               <div>
                 <label className="block text-xs text-slate-300 mb-2 tracking-wider uppercase font-semibold">
-                  2. Operational Role
+                  3. Operational Role
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['EOD', 'Support/Non-combat', 'Combat'] as SoldierRoleOption[]).map((r) => (
                     <button
                       type="button"
                       key={r}
-                      onClick={() => setSoldierRole(r)}
+                      onClick={() => setRoleWrapper(r)}
                       className={`py-3 px-2 rounded-lg text-xs font-mono font-bold text-center border transition-all cursor-pointer ${
                         soldierRole === r
                           ? 'bg-cyan-950 text-cyan-300 border-cyan-400 shadow-[0_0_10px_rgba(0,229,255,0.25)]'
@@ -524,8 +716,8 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
           )}
 
           {/* ========================================================= */}
-          {/* TAB 2: ADD FORCE (4 options: Administrator, Regional HQ, Radar, Field Force) */}
-          {/* Each requires: name, description. Regional HQ also requires: area/region. */}
+          {/* TAB 2: ADD FORCE (Administrator, Regional HQ, Radar, Field Force) */}
+          {/* Name & Description. Regional HQ also requires Area/Region. */}
           {/* ========================================================= */}
           {activeTab === 'force' && (
             <form onSubmit={handleSubmitForce} className="space-y-4">
@@ -634,9 +826,9 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
           )}
 
           {/* ========================================================= */}
-          {/* TAB 3: ADD USER (Username, Password) */}
-          {/* "Field Team" and "Radar": Created without linking to soldier. */}
-          {/* Other types: Must be linked to a soldier from dropdown (unlinked only). */}
+          {/* TAB 3: ADD USER (Username, Password, User Type) */}
+          {/* Field Team: select specific team from existing ones */}
+          {/* Regional HQ: select soldier AND regional HQ (no region dropdown) */}
           {/* ========================================================= */}
           {activeTab === 'user' && (
             <form onSubmit={handleSubmitUser} className="space-y-4">
@@ -694,31 +886,118 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                 </div>
               </div>
 
-              {/* Regional HQ: Region Selector */}
-              {userType === 'Regional HQ' && (
-                <div>
-                  <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
-                    Operational Region
-                  </label>
-                  <select
-                    value={userRegion}
-                    onChange={(e) => setUserRegion(e.target.value as Area)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
-                  >
-                    <option value="North">North Sector</option>
-                    <option value="Center">Center Sector</option>
-                    <option value="South">South Sector</option>
-                  </select>
+              {/* 1. Field Team: Select Team from Existing Ones */}
+              {userType === 'Field Team' && (
+                <div className="p-3.5 rounded-lg bg-emerald-950/30 border border-emerald-700/60 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs text-emerald-300 tracking-wider uppercase font-semibold flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Select Target Field Team</span>
+                    </label>
+                    <span className="text-[10px] text-emerald-300 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-700">
+                      {availableTeams.length} Unassigned Teams
+                    </span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400">
+                    Select a team from the existing ones. Teams already assigned a user account cannot be linked again.
+                  </p>
+
+                  {availableTeams.length === 0 ? (
+                    <div className="p-2.5 rounded bg-amber-950/40 border border-amber-700/70 text-amber-200 text-xs">
+                      All field teams currently have assigned user accounts. Please add a new Field Force in the "Add Force" tab first.
+                    </div>
+                  ) : (
+                    <select
+                      required
+                      value={selectedTeamId}
+                      onChange={(e) => setSelectedTeamId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-emerald-600 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="">-- Choose specific team --</option>
+                      {availableTeams.map((team) => (
+                        <option key={team.id} value={team.id}>
+                          {team.name} {team.description ? `(${team.description})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
-              {/* Soldier Linking Rule Section (only for user types that require soldier linking) */}
-              {userType !== 'Field Team' && userType !== 'Radar' && (
+              {/* 2. Regional HQ: Select Linked Soldier AND Assigned Regional Headquarters (No Region Selector) */}
+              {userType === 'Regional HQ' && (
+                <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-700/70 space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Compass className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-semibold text-indigo-200 uppercase tracking-wider">
+                      Regional Headquarters Account Assignment
+                    </span>
+                  </div>
+
+                  {/* Assigned Regional Headquarters Dropdown */}
+                  <div>
+                    <label className="block text-xs text-indigo-300 mb-1 tracking-wider uppercase font-semibold">
+                      Assigned Regional Headquarters
+                    </label>
+                    <select
+                      required
+                      value={selectedRegionalHQId}
+                      onChange={(e) => setSelectedRegionalHQId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-indigo-500 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="">-- Select Regional Headquarters --</option>
+                      {allRegionalHQs.map((hq) => (
+                        <option key={hq.id} value={hq.id}>
+                          {hq.name} [Sector: {hq.area}]
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Linked Soldier Dropdown (Unlinked Soldiers Only) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs text-indigo-300 tracking-wider uppercase font-semibold">
+                        Linked Soldier
+                      </label>
+                      <span className="text-[10px] text-cyan-300 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800">
+                        {unlinkedSoldiers.length} Unlinked Available
+                      </span>
+                    </div>
+
+                    {isLoadingSoldiers ? (
+                      <div className="p-2 text-xs text-slate-400 animate-pulse">Loading unlinked soldiers...</div>
+                    ) : unlinkedSoldiers.length === 0 ? (
+                      <div className="p-2.5 rounded bg-amber-950/40 border border-amber-700/70 text-amber-200 text-xs">
+                        No unlinked soldiers available. Please register a soldier first in the "Add Soldier" tab.
+                      </div>
+                    ) : (
+                      <select
+                        required
+                        value={selectedSoldierId}
+                        onChange={(e) => setSelectedSoldierId(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-indigo-500 rounded-lg text-white text-xs focus:border-cyan-500 focus:outline-none cursor-pointer"
+                      >
+                        <option value="">-- Choose unlinked soldier --</option>
+                        {unlinkedSoldiers.map((soldier) => (
+                          <option key={soldier.id} value={soldier.id}>
+                            {soldier.name} [ID: {soldier.id}] — Role: {soldier.role}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Administrator: Linked to Soldier (Unlinked Only) */}
+              {userType === 'Administrator' && (
                 <div className="p-3.5 rounded-lg bg-indigo-950/40 border border-indigo-700/70 space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="block text-xs text-indigo-300 tracking-wider uppercase font-semibold flex items-center gap-1.5">
                       <Shield className="w-3.5 h-3.5" />
-                      <span>Link to Soldier (Mandatory for {userType})</span>
+                      <span>Link to Soldier (Mandatory for Administrator)</span>
                     </label>
                     <span className="text-[10px] text-cyan-300 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800">
                       {unlinkedSoldiers.length} Unlinked Available
@@ -726,14 +1005,14 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
                   </div>
 
                   <p className="text-[11px] text-slate-400">
-                    Select an unlinked soldier from the registry. Already linked soldiers do not appear:
+                    Select an unlinked soldier from the registry:
                   </p>
 
                   {isLoadingSoldiers ? (
                     <div className="p-2 text-xs text-slate-400 animate-pulse">Loading unlinked soldiers...</div>
                   ) : unlinkedSoldiers.length === 0 ? (
                     <div className="p-2.5 rounded bg-amber-950/40 border border-amber-700/70 text-amber-200 text-xs">
-                      No unlinked soldiers are currently available. Please register a new soldier in the "Add Soldier" tab first.
+                      No unlinked soldiers available. Please register a soldier first in the "Add Soldier" tab.
                     </div>
                   ) : (
                     <select
@@ -776,4 +1055,8 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
       </div>
     </div>
   )
+
+  function setRoleWrapper(r: SoldierRoleOption) {
+    setSoldierRole(r)
+  }
 }

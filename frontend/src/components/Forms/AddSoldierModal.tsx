@@ -18,6 +18,7 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
 }) => {
   const { loadSnapshot } = useMapStore()
 
+  const [soldierId, setSoldierId] = useState('')
   const [name, setName] = useState('')
   const [role, setRole] = useState<SoldierRoleOption>('Combat')
   const [isLoading, setIsLoading] = useState(false)
@@ -26,11 +27,22 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
 
   if (!isOpen) return null
 
+  const handleGenerateId = () => {
+    const randomId = Math.floor(1000000 + Math.random() * 9000000).toString()
+    setSoldierId(randomId)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setErrorMessage(null)
     setSuccessMessage(null)
     setIsLoading(true)
+
+    if (!soldierId || soldierId.length !== 7 || !/^\d{7}$/.test(soldierId)) {
+      setErrorMessage('Soldier military ID must be exactly 7 digits.')
+      setIsLoading(false)
+      return
+    }
 
     if (!name.trim()) {
       setErrorMessage('Soldier name is required.')
@@ -40,16 +52,18 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
 
     try {
       const created = await api.admin.createSoldier({
+        id: soldierId.trim(),
         name: name.trim(),
         role,
         squad_id: initialSquadId || null,
       })
 
-      setSuccessMessage(`Soldier ${created.name} (${created.role}) successfully registered!`)
+      setSuccessMessage(`Soldier ${created.name} (ID: ${created.id}) successfully registered!`)
       await loadSnapshot()
 
       setTimeout(() => {
         setSuccessMessage(null)
+        setSoldierId('')
         setName('')
         setRole('Combat')
         onClose()
@@ -80,7 +94,7 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
                 ADD SOLDIER
               </h2>
               <p className="text-[11px] text-slate-400 font-mono">
-                MILITARY REGISTRATION (3 REQUIRED FIELDS)
+                MILITARY REGISTRATION (7-DIGIT ID REQUIRED)
               </p>
             </div>
           </div>
@@ -106,10 +120,35 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 font-mono">
-          {/* Field 1: Name */}
+          {/* Field 1: 7-Digit Military ID */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-slate-300 tracking-wider uppercase font-semibold">
+                1. 7-Digit Military ID
+              </label>
+              <button
+                type="button"
+                onClick={handleGenerateId}
+                className="text-[10px] text-cyan-400 hover:underline cursor-pointer"
+              >
+                + GENERATE ID
+              </button>
+            </div>
+            <input
+              type="text"
+              required
+              maxLength={7}
+              placeholder="e.g. 5000001"
+              value={soldierId}
+              onChange={(e) => setSoldierId(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-cyan-300 text-xs focus:border-cyan-500 focus:outline-none"
+            />
+          </div>
+
+          {/* Field 2: Name */}
           <div>
             <label className="block text-xs text-slate-300 mb-1 tracking-wider uppercase font-semibold">
-              1. Soldier Name
+              2. Soldier Full Name
             </label>
             <input
               type="text"
@@ -121,10 +160,10 @@ export const AddSoldierModal: React.FC<AddSoldierModalProps> = ({
             />
           </div>
 
-          {/* Field 2 & 3: Role (EOD, Support/Non-combat, Combat) */}
+          {/* Field 3: Role (EOD, Support/Non-combat, Combat) */}
           <div>
             <label className="block text-xs text-slate-300 mb-2 tracking-wider uppercase font-semibold">
-              2. Operational Role
+              3. Operational Role
             </label>
             <div className="grid grid-cols-3 gap-2">
               {(['EOD', 'Support/Non-combat', 'Combat'] as SoldierRoleOption[]).map((r) => (
