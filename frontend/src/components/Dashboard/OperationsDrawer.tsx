@@ -28,7 +28,7 @@ export const OperationsDrawer: React.FC<OperationsDrawerProps> = ({
   const {
     squads,
     threats,
-    setSelectedEntity,
+    focusEntity,
   } = useMapStore()
   const { user } = useAuthStore()
   const [activeTab, setActiveTab] = useState<'live' | 'alerts'>(initialTab)
@@ -51,6 +51,15 @@ export const OperationsDrawer: React.FC<OperationsDrawerProps> = ({
   const activeThreatList = Object.values(threats).filter(
     (t) => t.status === 'active' && t.engagement_status !== 'resolved'
   )
+
+  const handleFocusSquad = (sq: Squad) => {
+    setSelectedSquad(sq)
+    focusEntity('squad', sq.id, sq.lat, sq.lon, 15)
+  }
+
+  const handleFocusThreat = (th: typeof activeThreatList[number]) => {
+    focusEntity('threat', th.id, th.lat, th.lon, 15)
+  }
 
   const getRoleBadge = (sq: Squad) => {
     switch (sq.role) {
@@ -153,10 +162,7 @@ export const OperationsDrawer: React.FC<OperationsDrawerProps> = ({
               return (
                 <div
                   key={sq.id}
-                  onClick={() => {
-                    setSelectedSquad(sq)
-                    setSelectedEntity({ type: 'squad', id: sq.id })
-                  }}
+                  onClick={() => handleFocusSquad(sq)}
                   className={`p-3 rounded-lg border text-xs font-mono transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-emerald-950/40 border-emerald-500 text-white shadow-md shadow-emerald-950/30'
@@ -186,9 +192,16 @@ export const OperationsDrawer: React.FC<OperationsDrawerProps> = ({
                       <Radio className="w-3 h-3 animate-pulse" />
                       <span>LIVE TELEMETRY ACTIVE</span>
                     </div>
-                    <span className="text-cyan-400 flex items-center gap-0.5 hover:underline font-bold">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleFocusSquad(sq)
+                      }}
+                      className="px-2 py-0.5 rounded bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 flex items-center gap-1 font-bold text-[10px] transition-colors cursor-pointer"
+                    >
                       FOCUS <ChevronRight className="w-3 h-3" />
-                    </span>
+                    </button>
                   </div>
                 </div>
               )
@@ -205,7 +218,7 @@ export const OperationsDrawer: React.FC<OperationsDrawerProps> = ({
             activeThreatList.map((th) => (
               <div
                 key={th.id}
-                onClick={() => setSelectedEntity({ type: 'threat', id: th.id })}
+                onClick={() => handleFocusThreat(th)}
                 className="p-3 rounded-lg border border-red-900/60 bg-red-950/20 hover:bg-red-950/50 hover:border-red-600 text-xs font-mono transition-all cursor-pointer shadow-sm shadow-red-950/30"
               >
                 <div className="flex items-center justify-between">

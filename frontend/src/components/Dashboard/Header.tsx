@@ -109,19 +109,21 @@ export const Header: React.FC<HeaderProps> = ({
           <span>OPEN ALERT</span>
         </button>
 
-        {/* Toggle Management / Administration Drawer (Opens on the Right) */}
-        <button
-          onClick={onToggleManagementDrawer}
-          title="Operational Management (Users, Forces, Soldiers)"
-          className={`px-3.5 py-2 rounded-lg font-mono text-xs font-semibold tracking-wider flex items-center space-x-2 border transition-all cursor-pointer ${
-            isManagementDrawerOpen
-              ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-md shadow-cyan-950/40'
-              : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-300'
-          }`}
-        >
-          <Users className="w-4 h-4 text-cyan-400" />
-          <span>MANAGEMENT ({rosterCount})</span>
-        </button>
+        {/* Toggle Management / Administration Drawer (Only for MainCommandCenter Admin) */}
+        {user?.role === 'MainCommandCenter' && (
+          <button
+            onClick={onToggleManagementDrawer}
+            title="Operational Management (Users, Forces, Soldiers)"
+            className={`px-3.5 py-2 rounded-lg font-mono text-xs font-semibold tracking-wider flex items-center space-x-2 border transition-all cursor-pointer ${
+              isManagementDrawerOpen
+                ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-md shadow-cyan-950/40'
+                : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-slate-300'
+            }`}
+          >
+            <Users className="w-4 h-4 text-cyan-400" />
+            <span>MANAGEMENT ({rosterCount})</span>
+          </button>
+        )}
 
         {/* User Badge */}
         {user && (

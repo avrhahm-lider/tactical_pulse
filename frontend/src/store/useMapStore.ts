@@ -57,12 +57,22 @@ function processDangerZone(
   }
 }
 
+export interface FocusTarget {
+  lat: number
+  lon: number
+  zoom?: number
+  id?: string
+  type?: 'squad' | 'threat'
+  timestamp: number
+}
+
 interface MapState {
   squads: Record<string, Squad>
   threats: Record<string, Threat>
   isLoading: boolean
   error: string | null
   selectedEntity: { type: 'squad' | 'threat'; id: string } | null
+  focusTarget: FocusTarget | null
   isPickingLocationOnMap: boolean
   pickedLocation: { lat: number; lon: number } | null
   proximityAlerts: Threat[]
@@ -82,6 +92,7 @@ interface MapState {
   addDangerZoneAlert: (alert: DangerZoneAlert) => void
   dismissDangerZoneAlert: (alertId: string) => void
   setSelectedEntity: (entity: { type: 'squad' | 'threat'; id: string } | null) => void
+  focusEntity: (type: 'squad' | 'threat', id: string, lat: number, lon: number, zoom?: number) => void
   setIsPickingLocationOnMap: (isPicking: boolean) => void
   setPickedLocation: (loc: { lat: number; lon: number } | null) => void
   setIsThreatModalOpen: (isOpen: boolean) => void
@@ -99,6 +110,7 @@ export const useMapStore = create<MapState>((set, get) => ({
   isLoading: false,
   error: null,
   selectedEntity: null,
+  focusTarget: null,
   isPickingLocationOnMap: false,
   pickedLocation: null,
   proximityAlerts: [],
@@ -110,6 +122,12 @@ export const useMapStore = create<MapState>((set, get) => ({
   selectedZoneFilter: 'Global',
   activeTileLayer: 'dark',
   setActiveTileLayer: (layer) => set({ activeTileLayer: layer }),
+  focusEntity: (type, id, lat, lon, zoom = 15) => {
+    set({
+      focusTarget: { type, id, lat, lon, zoom, timestamp: Date.now() },
+      selectedEntity: { type, id },
+    })
+  },
 
   loadSnapshot: async () => {
     set({ isLoading: true, error: null })

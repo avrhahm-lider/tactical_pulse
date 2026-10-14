@@ -396,6 +396,7 @@ export const TacticalMap: React.FC = () => {
     squads,
     threats,
     dangerZoneAlerts,
+    focusTarget,
     isPickingLocationOnMap,
     pickedLocation,
     setIsPickingLocationOnMap,
@@ -711,6 +712,30 @@ export const TacticalMap: React.FC = () => {
     }
   }, [isAutoFitMode, relevantSignature, autoAdjustView])
 
+  // Center & focus map camera on targeted squad or threat from Live drawer or alerts
+  useEffect(() => {
+    if (!focusTarget || !mapInstanceRef.current) return
+    const map = mapInstanceRef.current
+    const targetZoom = focusTarget.zoom ?? 15
+    isProgrammaticMoveRef.current = true
+    map.flyTo([focusTarget.lat, focusTarget.lon], targetZoom, {
+      duration: 1.0,
+      easeLinearity: 0.25,
+    })
+
+    if (focusTarget.type === 'squad' && focusTarget.id) {
+      const marker = squadMarkersRef.current.get(focusTarget.id)
+      if (marker && !marker.isPopupOpen()) {
+        marker.openPopup()
+      }
+    } else if (focusTarget.type === 'threat' && focusTarget.id) {
+      const marker = threatMarkersRef.current.get(focusTarget.id)
+      if (marker && !marker.isPopupOpen()) {
+        marker.openPopup()
+      }
+    }
+  }, [focusTarget])
+
   // Render Operational Zones & Authorized Sector Visualizations
   useEffect(() => {
     const zonesLayer = zonesLayerRef.current
@@ -835,10 +860,11 @@ export const TacticalMap: React.FC = () => {
       // Icon HTML
       const iconWidth = 36
       const iconHeight = 36
+      const iconKey = `${baseColor}_${isMe}`
 
       const iconHtml = `
-        <div style="position: relative; width: 36px; height: 36px; cursor: pointer; pointer-events: auto; display: flex; align-items: center; justify-content: center;">
-          <div style="
+        <div style="position: relative; width: 36px; height: 36px; cursor: pointer; pointer-events: auto; user-select: none; display: flex; align-items: center; justify-content: center;">
+          <div data-rotator="true" style="
             width: 36px;
             height: 36px;
             background: ${baseColor};
@@ -870,12 +896,22 @@ export const TacticalMap: React.FC = () => {
       let marker = squadMarkersRef.current.get(squad.id)
 
       if (marker) {
-        // Smoothly updates marker location (Leaflet natively shifts the open popup with the marker)
         marker.setLatLng([squad.lat, squad.lon])
-        marker.setIcon(customIcon)
+        const lastKey = (marker as unknown as { _iconKey?: string })._iconKey
+        if (lastKey !== iconKey) {
+          marker.setIcon(customIcon)
+          ;(marker as unknown as { _iconKey: string })._iconKey = iconKey
+        } else {
+          const el = marker.getElement()
+          const rotator = el?.querySelector('[data-rotator="true"]') as HTMLElement | null
+          if (rotator) {
+            rotator.style.transform = `rotate(${squad.heading || 0}deg)`
+          }
+        }
         marker.setPopupContent(popupHtml)
       } else {
-        const newMarker = L.marker([squad.lat, squad.lon], { icon: customIcon })
+        const newMarker = L.marker([squad.lat, squad.lon], { icon: customIcon, riseOnHover: true })
+        ;(newMarker as unknown as { _iconKey: string })._iconKey = iconKey
         newMarker.bindPopup(popupHtml, {
           className: 'tactical-force-popup',
           closeButton: true,
@@ -884,18 +920,20 @@ export const TacticalMap: React.FC = () => {
           offset: [0, -18],
         })
 
-        // Unregister Leaflet's internal auto-open click handler so it doesn't conflict with our toggle
-        newMarker.off(
-          'click',
-          (newMarker as unknown as { _openPopup: (e: L.LeafletMouseEvent) => void })._openPopup,
-          newMarker
-        )
+        newMarker.off('click')
 
-        // Custom toggle on click: clicking the object opens pop-up without resizing or zooming map
         newMarker.on('click', (e) => {
           L.DomEvent.stopPropagation(e)
-          newMarker.togglePopup()
+          if (newMarker.isPopupOpen()) {
+            newMarker.closePopup()
+          } else {
+            newMarker.openPopup()
+          }
           setSelectedEntity({ type: 'squad', id: squad.id })
+        })
+
+        newMarker.on('mousedown', (e) => {
+          L.DomEvent.stopPropagation(e)
         })
 
         newMarker.addTo(markersLayer)
@@ -1089,17 +1127,23 @@ export const TacticalMap: React.FC = () => {
       })
 
       const popupHtml = buildThreatPopupHtml(threat, squads, user, isUnderIntrusion)
+      const threatIconKey = `${threat.threat_type}_${threatColor}_${isUnderIntrusion}_${isDrone}`
 
       let marker = threatMarkersRef.current.get(threat.id)
       if (marker) {
         marker.setLatLng([threat.lat, threat.lon])
-        marker.setIcon(threatIcon)
+        const lastKey = (marker as unknown as { _iconKey?: string })._iconKey
+        if (lastKey !== threatIconKey) {
+          marker.setIcon(threatIcon)
+          ;(marker as unknown as { _iconKey: string })._iconKey = threatIconKey
+        }
         marker.setPopupContent(popupHtml)
         if (!threatsLayer.hasLayer(marker)) {
           marker.addTo(threatsLayer)
         }
       } else {
-        const newMarker = L.marker([threat.lat, threat.lon], { icon: threatIcon })
+        const newMarker = L.marker([threat.lat, threat.lon], { icon: threatIcon, riseOnHover: true })
+        ;(newMarker as unknown as { _iconKey: string })._iconKey = threatIconKey
         newMarker.bindPopup(popupHtml, {
           className: 'tactical-force-popup',
           closeButton: true,
@@ -1108,24 +1152,27 @@ export const TacticalMap: React.FC = () => {
           offset: [0, -18],
         })
 
-        // Unregister Leaflet's internal auto-open click handler so our custom toggle controls it
-        newMarker.off(
-          'click',
-          (newMarker as unknown as { _openPopup: (e: L.LeafletMouseEvent) => void })._openPopup,
-          newMarker
-        )
+        newMarker.off('click')
 
-        // Custom toggle on click: clicking the icon toggles the pop-up panel (without changing map size or zoom)
         newMarker.on('click', (e) => {
           L.DomEvent.stopPropagation(e)
-          newMarker.togglePopup()
+          if (newMarker.isPopupOpen()) {
+            newMarker.closePopup()
+          } else {
+            newMarker.openPopup()
+          }
+          setSelectedEntity({ type: 'threat', id: threat.id })
+        })
+
+        newMarker.on('mousedown', (e) => {
+          L.DomEvent.stopPropagation(e)
         })
 
         newMarker.addTo(threatsLayer)
         threatMarkersRef.current.set(threat.id, newMarker)
       }
     })
-  }, [threats, squads, dangerZoneAlerts, user])
+  }, [threats, squads, dangerZoneAlerts, user, setSelectedEntity])
 
   return (
     <div className={`relative w-full h-full ${isPickingLocationOnMap ? 'cursor-crosshair' : ''}`}>

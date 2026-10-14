@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api } from '../../services/api'
 import { useMapStore } from '../../store/useMapStore'
+import { useAuthStore } from '../../store/useAuthStore'
 import type { Soldier, Area, Squad } from '../../types'
 
 export type RegistrationTab = 'soldier' | 'force' | 'user'
@@ -47,6 +48,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     registrationModalTab,
     setRegistrationModalTab,
   } = useMapStore()
+  const { user } = useAuthStore()
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<RegistrationTab>('soldier')
@@ -545,7 +547,7 @@ export const UserRegistrationModal: React.FC<UserRegistrationModalProps> = ({
     }
   }
 
-  if (!isOpen) return null
+  if (!isOpen || user?.role !== 'MainCommandCenter') return null
 
   return (
     <div className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">

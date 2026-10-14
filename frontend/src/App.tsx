@@ -86,8 +86,9 @@ export const App: React.FC = () => {
           setIsLeftDrawerOpen(true)
         }}
         onToggleManagementDrawer={() => {
+          if (user?.role !== 'MainCommandCenter') return
           if (!isRightDrawerOpen) {
-            setRightDrawerTab(user?.role === 'MainCommandCenter' ? 'users' : 'forces')
+            setRightDrawerTab('users')
           }
           setIsRightDrawerOpen((prev) => !prev)
         }}
@@ -111,12 +112,14 @@ export const App: React.FC = () => {
           initialTab={leftDrawerTab}
         />
 
-        {/* Operational Management Drawer (Right: Users, Forces, Soldiers) */}
-        <ManagementDrawer
-          isOpen={isRightDrawerOpen}
-          onClose={() => setIsRightDrawerOpen(false)}
-          initialTab={rightDrawerTab}
-        />
+        {/* Operational Management Drawer (Right: Users, Forces, Soldiers) - Strictly Admin only */}
+        {user?.role === 'MainCommandCenter' && (
+          <ManagementDrawer
+            isOpen={isRightDrawerOpen}
+            onClose={() => setIsRightDrawerOpen(false)}
+            initialTab={rightDrawerTab}
+          />
+        )}
 
         {/* Threat Creation Modal */}
         <ThreatModal
@@ -124,11 +127,13 @@ export const App: React.FC = () => {
           onClose={() => setIsThreatModalOpen(false)}
         />
 
-        {/* Force & Regional HQ Registration Modal */}
-        <UserRegistrationModal
-          isOpen={isUserRegistrationModalOpen}
-          onClose={() => setIsUserRegistrationModalOpen(false)}
-        />
+        {/* Force & Regional HQ Registration Modal - Strictly Admin only */}
+        {user?.role === 'MainCommandCenter' && (
+          <UserRegistrationModal
+            isOpen={isUserRegistrationModalOpen}
+            onClose={() => setIsUserRegistrationModalOpen(false)}
+          />
+        )}
 
         {/* Threat Action / Details Modal */}
         {selectedThreat && (
