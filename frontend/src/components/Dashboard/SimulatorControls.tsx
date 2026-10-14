@@ -106,6 +106,7 @@ export const SimulatorControls: React.FC = () => {
         await simulatorApi.start('all')
         setIsSimulatorRunning(true)
         setSimMode('all')
+        await useMapStore.getState().loadSnapshot()
       }
     } catch (err) {
       console.error('Failed to toggle master simulation:', err)
@@ -126,6 +127,7 @@ export const SimulatorControls: React.FC = () => {
         await simulatorApi.start('squads')
         setIsSimulatorRunning(true)
         setSimMode('squads')
+        await useMapStore.getState().loadSnapshot()
       }
     } catch (err) {
       console.error('Failed to toggle squad patrol:', err)
@@ -146,6 +148,7 @@ export const SimulatorControls: React.FC = () => {
         await simulatorApi.start('drones')
         setIsSimulatorRunning(true)
         setSimMode('drones')
+        await useMapStore.getState().loadSnapshot()
       }
     } catch (err) {
       console.error('Failed to toggle drone flight:', err)

@@ -691,6 +691,10 @@ class SimulatorEngine:
         for d in entities["drones"]:
             await broadcast_threat_event("threat_updated", d["payload"])
 
+        # Immediately emit active unit state so tactical map loads squads without refresh
+        for sq in entities["squads"]:
+            await broadcast_unit_status_changed(str(sq["id"]), "active")
+
         # 2. Launch squad patrol tasks with precomputed routes
         if mode in ["all", "squads"]:
             for sq in entities["squads"]:

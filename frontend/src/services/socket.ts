@@ -70,6 +70,8 @@ export function connectSocket(token: string, currentUserId?: string): Socket {
   socket.on('unit_status_changed', (payload: UnitStatusChangedPayload) => {
     if (payload.status === 'inactive' || payload.status === 'deleted') {
       useMapStore.getState().removeSquad(payload.id)
+    } else if (payload.status === 'active' || payload.status === 'created') {
+      useMapStore.getState().loadSnapshot()
     }
   })
 

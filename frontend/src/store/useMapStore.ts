@@ -154,12 +154,20 @@ export const useMapStore = create<MapState>((set, get) => ({
   },
 
   updateSquadPosition: (payload, currentUserId) => {
+    const existing = get().squads[payload.id]
+    if (!existing) {
+      if (!get().isLoading) {
+        get().loadSnapshot()
+      }
+      return
+    }
+
     set((state) => {
-      const existing = state.squads[payload.id]
-      if (!existing) return state
+      const current = state.squads[payload.id]
+      if (!current) return state
 
       const updatedSquad: Squad = {
-        ...existing,
+        ...current,
         lat: payload.lat,
         lon: payload.lon,
         heading: payload.heading,
