@@ -200,6 +200,10 @@ export const api = {
       const res = await apiClient.post<{ is_running: boolean; mode: string }>('/admin/simulator/stop')
       return res.data
     },
+    reset: async () => {
+      const res = await apiClient.post<{ is_running: boolean; mode: string }>('/admin/simulator/reset')
+      return res.data
+    },
   },
 }
 

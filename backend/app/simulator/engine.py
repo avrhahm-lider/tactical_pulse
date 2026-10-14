@@ -6,7 +6,7 @@ from uuid import UUID
 
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.functions import ST_X, ST_Y
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.core.security import hash_password
 from app.db.postgres import async_session_maker
@@ -20,6 +20,7 @@ from app.sockets.server import (
     _ensure_threats_cache_loaded,
     broadcast_threat_event,
     broadcast_to_visibility_range,
+    broadcast_unit_status_changed,
 )
 
 # Tactical Scenario Definitions
@@ -97,6 +98,7 @@ SQUAD_CONFIGS = [
         "soldier_id": "1000001",
         "soldier_name": "David Cohen",
         "soldier_role": "commander",
+        "roster_ids": ["1000001", "1000002", "1000003"],
         "route": [
             (32.0850, 34.7880),
             (32.0920, 34.7820),
@@ -117,6 +119,7 @@ SQUAD_CONFIGS = [
         "soldier_id": "2000001",
         "soldier_name": "Ariel Mizrahi",
         "soldier_role": "commander",
+        "roster_ids": ["2000001", "2000002", "2000003"],
         "route": [
             (32.0920, 34.7920),
             (32.0950, 34.7920),
@@ -594,6 +597,12 @@ class SimulatorEngine:
                     )
                     session.add(u)
                     await session.flush()
+
+                if "roster_ids" in sc:
+                    await session.execute(
+                        update(Soldier).where(Soldier.id.in_(sc["roster_ids"])).values(squad_id=u.id)
+                    )
+
                 squad_list.append({
                     "id": u.id,
                     "username": sc["username"],
@@ -660,12 +669,9 @@ class SimulatorEngine:
             print(f"[SIMULATOR DB SYNC ERROR] {e}")
 
     async def warmup(self) -> None:
-        """Preloads and warms up simulation entities in background at server start."""
-        try:
-            await self._load_or_provision_entities()
-            print("[SIMULATOR] Engine entities warmed up successfully.")
-        except Exception as e:
-            print(f"[SIMULATOR WARMUP WARNING] {e}")
+        """Precomputes tactical paths in memory without populating DB until simulation starts."""
+        self._init_precomputed_paths()
+        print("[SIMULATOR] Engine ready (standing by for start).")
 
     async def start(self, mode: str = "all") -> dict[str, Any]:
         """
@@ -735,6 +741,46 @@ class SimulatorEngine:
             async def _flush_all():
                 await asyncio.gather(*flush_tasks, return_exceptions=True)
             self._spawn_persist_task(_flush_all())
+
+        return self.get_status()
+
+    async def reset(self) -> dict[str, Any]:
+        """Stops simulation tasks and completely purges simulation entities from map and DB."""
+        await self.stop()
+        self._cached_entities = None
+        self._step_indices.clear()
+        self._latest_squad_state.clear()
+        self._latest_drone_state.clear()
+
+        async with async_session_maker() as session:
+            gt_names = [gt["name"] for gt in GROUND_THREATS]
+            drone_names = [cfg["name"] for cfg in DRONE_CONFIGS]
+            all_sim_threats = gt_names + drone_names
+
+            threats_q = await session.execute(
+                select(Threat).where(Threat.name.in_(all_sim_threats))
+            )
+            sim_threats = threats_q.scalars().all()
+            for t in sim_threats:
+                await broadcast_threat_event("threat_removed", {"id": str(t.id), "status": "inactive"})
+            if sim_threats:
+                await session.execute(delete(Threat).where(Threat.id.in_([t.id for t in sim_threats])))
+
+            squad_usernames = [sc["username"] for sc in SQUAD_CONFIGS]
+            squads_q = await session.execute(
+                select(User).where(User.username.in_(squad_usernames))
+            )
+            squad_users = squads_q.scalars().all()
+            squad_ids = [u.id for u in squad_users]
+            if squad_ids:
+                await session.execute(update(Soldier).where(Soldier.squad_id.in_(squad_ids)).values(squad_id=None))
+                await session.execute(delete(MapEntity).where(MapEntity.id.in_(squad_ids)))
+                for sid in squad_ids:
+                    await broadcast_unit_status_changed(str(sid), "deleted")
+                await session.execute(delete(User).where(User.id.in_(squad_ids)))
+
+            await session.commit()
+            await _ensure_threats_cache_loaded(session)
 
         return self.get_status()
 

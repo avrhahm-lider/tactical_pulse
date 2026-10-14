@@ -19,6 +19,7 @@ import {
   Plane,
   Users,
   Rocket,
+  RotateCcw,
   X,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/useAuthStore'
@@ -148,6 +149,24 @@ export const SimulatorControls: React.FC = () => {
       }
     } catch (err) {
       console.error('Failed to toggle drone flight:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Reset simulation and clear simulated entities from the tactical map
+  const handleResetSimulation = async () => {
+    if (!window.confirm('Reset simulation and clear all simulated forces & threats from the tactical map?')) {
+      return
+    }
+    setLoading(true)
+    try {
+      await simulatorApi.reset()
+      setIsSimulatorRunning(false)
+      setSimMode('stopped')
+      await useMapStore.getState().loadSnapshot()
+    } catch (err) {
+      console.error('Failed to reset simulation:', err)
     } finally {
       setLoading(false)
     }
@@ -620,6 +639,17 @@ export const SimulatorControls: React.FC = () => {
                 <span>🚀 START MASTER SIMULATION (ALL UNITS)</span>
               </>
             )}
+          </button>
+
+          {/* Reset / Clear Map Button */}
+          <button
+            onClick={handleResetSimulation}
+            disabled={loading}
+            className="w-full py-1.5 px-3 rounded-lg font-medium text-xs flex items-center justify-center space-x-2 cursor-pointer transition-all bg-slate-900/80 hover:bg-red-950/50 border border-slate-700/80 hover:border-red-600/80 text-slate-300 hover:text-red-200"
+            title="Purge simulated squads and threats to show a clean map"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-red-400" />
+            <span>RESET SIMULATION (CLEAR MAP)</span>
           </button>
 
           {/* Switcher Tabs: Squads | Drones | Master Mode */}

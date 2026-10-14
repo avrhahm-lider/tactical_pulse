@@ -13,7 +13,6 @@ from app.db.postgres import async_session_maker, init_db
 from app.models.audit_log import AuditLog
 from app.models.map_entity import MapEntity
 from app.models.soldier import Soldier
-from app.models.threat import Threat
 from app.models.user import User
 
 DEFAULT_SOLDIERS = [
@@ -72,30 +71,6 @@ DEFAULT_USERS = [
         "soldier_id": "9990004",
         "map_point": "POINT(34.7000 31.2000)",
         "heading": 0.0,
-    },
-    {
-        "username": "squad_golani",
-        "password": "squad123",
-        "role": "Squad",
-        "area": "Center",
-        "name": "Golani Recon Squad",
-        "description": "Elite forward reconnaissance patrol",
-        "soldier_id": "1000001",
-        "squad_soldier_ids": ["1000001", "1000002", "1000003"],
-        "map_point": "POINT(34.7818 32.0853)",
-        "heading": 90.0,
-    },
-    {
-        "username": "squad_paratroopers",
-        "password": "squad123",
-        "role": "SapperSquad",
-        "area": "Center",
-        "name": "Paratroopers Sapper Squad",
-        "description": "Combat engineering & EOD assault unit",
-        "soldier_id": "2000001",
-        "squad_soldier_ids": ["2000001", "2000002", "2000003"],
-        "map_point": "POINT(34.7890 32.0920)",
-        "heading": 180.0,
     },
     {
         "username": "radar_post_1",
@@ -188,56 +163,6 @@ async def seed_database() -> None:
                     me.geom = WKTElement(u_def["map_point"], srid=4326)
         await session.flush()
 
-        # 5. Ensure default demo threats exist
-        t_ied = (await session.execute(select(Threat).where(Threat.name == "IED Blockade Route 4"))).scalar_one_or_none()
-        if not t_ied:
-            cmd_center = user_map["command_center"]
-            session.add(
-                Threat(
-                    type="immovable",
-                    name="IED Blockade Route 4",
-                    description="Suspicious explosive device spotted near crossroads",
-                    threat_type="explosive",
-                    severity_level="high",
-                    engagement_status="unassigned",
-                    assigned_to_id=None,
-                    geom=WKTElement("POINT(34.7800 32.0800)", srid=4326),
-                    altitude=None,
-                    radius=150.0,
-                    status="active",
-                    created_by_id=cmd_center.id,
-                    created_by_soldier_id="9990003",
-                )
-            )
-        else:
-            t_ied.status = "active"
-            t_ied.engagement_status = "unassigned"
-            t_ied.assigned_to_id = None
-
-        t_drone = (await session.execute(select(Threat).where(Threat.name == "Hostile Recon Drone"))).scalar_one_or_none()
-        if not t_drone:
-            radar_post = user_map["radar_post_1"]
-            session.add(
-                Threat(
-                    type="movable",
-                    name="Hostile Recon Drone",
-                    description="Low-altitude hostile UAV detected entering northern airspace",
-                    threat_type="drone",
-                    severity_level="critical",
-                    engagement_status="unassigned",
-                    assigned_to_id=None,
-                    geom=WKTElement("POINT(35.5200 33.1800)", srid=4326),
-                    altitude=450.0,
-                    radius=300.0,
-                    status="active",
-                    created_by_id=radar_post.id,
-                    created_by_soldier_id="3000001",
-                )
-            )
-        else:
-            t_drone.status = "active"
-            t_drone.engagement_status = "unassigned"
-            t_drone.assigned_to_id = None
 
         # 6. Audit log entry
         admin_obj = user_map["admin"]

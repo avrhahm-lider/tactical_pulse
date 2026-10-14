@@ -46,10 +46,14 @@ async def _cleanup_test_artifacts():
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_test_suite():
-    """Initializes standard demo seed data once per test session."""
+    """Initializes standard seed data and test simulation entities for tests, then cleans up."""
+    from app.simulator.engine import simulator_engine
+
     await _cleanup_test_artifacts()
     await seed_database()
+    await simulator_engine._load_or_provision_entities()
     yield
+    await simulator_engine.reset()
     await _cleanup_test_artifacts()
 
 

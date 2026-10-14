@@ -47,6 +47,14 @@ async def stop_simulator(
     return await simulator_engine.stop()
 
 
+@router.post("/reset")
+async def reset_simulator(
+    current_admin: User = Depends(require_main_command),
+):
+    """Stops simulation and removes simulation entities from map and DB."""
+    return await simulator_engine.reset()
+
+
 @router.post("/step")
 async def manual_step_simulator(
     req: SimulatorStepRequest,
